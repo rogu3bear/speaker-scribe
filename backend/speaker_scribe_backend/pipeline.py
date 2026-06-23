@@ -3,9 +3,11 @@ from __future__ import annotations
 import os
 import time
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
+from .models import Speaker
 from .models import TranscribeOptions
 from .models import TranscriptSegment
 from .transcript import build_speakers
@@ -14,17 +16,15 @@ from .transcript import normalize_whispermlx_result
 ProgressCallback = Callable[[float, str], None]
 
 
+@dataclass(frozen=True)
 class TranscriptionResult:
-    def __init__(
-        self,
-        segments: list[TranscriptSegment],
-        duration: float | None,
-        language: str | None = None,
-    ) -> None:
-        self.segments = segments
-        self.duration = duration
-        self.language = language
-        self.speakers = build_speakers(segments)
+    segments: list[TranscriptSegment]
+    duration: float | None
+    language: str | None = None
+
+    @property
+    def speakers(self) -> list[Speaker]:
+        return build_speakers(self.segments)
 
 
 class Transcriber(Protocol):

@@ -273,6 +273,11 @@ button:disabled {
   color: var(--teal-dark);
 }
 
+.disabled-action {
+  color: var(--faint);
+  pointer-events: none;
+}
+
 .icon-button {
   background: transparent;
   border: 1px solid transparent;
@@ -313,6 +318,16 @@ button:disabled {
   display: grid;
   gap: 8px;
   min-width: 0;
+}
+
+.empty-list {
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--radius);
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.4;
+  margin: 0;
+  padding: 12px;
 }
 
 .job-item {
