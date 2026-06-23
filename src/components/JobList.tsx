@@ -1,4 +1,5 @@
 import { RefreshCcw } from "lucide-react";
+import { statusTone } from "../lib/presentation";
 import type { Job } from "../types";
 
 type JobListProps = {
@@ -29,7 +30,7 @@ export function JobList({ jobs, activeJobId, onSelectJob, onRefresh }: JobListPr
               type="button"
               onClick={() => onSelectJob(job.id)}
             >
-              <span className={`status-dot ${statusTone(job.status)}`} />
+              <span className={`status-dot ${statusTone(job.status)}`} aria-hidden="true" />
               <span>
                 <strong>{job.original_name}</strong>
                 <small>{job.stage}</small>
@@ -40,17 +41,4 @@ export function JobList({ jobs, activeJobId, onSelectJob, onRefresh }: JobListPr
       </div>
     </>
   );
-}
-
-export function statusTone(status: Job["status"]): string {
-  switch (status) {
-    case "completed":
-      return "good";
-    case "failed":
-      return "bad";
-    case "running":
-      return "live";
-    default:
-      return "idle";
-  }
 }

@@ -1,6 +1,6 @@
 import { Captions, CheckCircle2, FileAudio, Loader2, PlayCircle } from "lucide-react";
-import { statusTone } from "./JobList";
 import { formatClock, formatDuration, progressLabel } from "../lib/format";
+import { speakerCountLabel, statusTone } from "../lib/presentation";
 import type { Job } from "../types";
 
 type TranscriptWorkspaceProps = {
@@ -20,10 +20,6 @@ export function TranscriptWorkspace({ job }: TranscriptWorkspaceProps) {
     );
   }
 
-  const detectedSpeakerText = `${job.speakers.length} ${
-    job.speakers.length === 1 ? "speaker" : "speakers"
-  }`;
-
   return (
     <section className="workspace" aria-label="Transcript editor">
       <header className="workspace-header">
@@ -33,7 +29,7 @@ export function TranscriptWorkspace({ job }: TranscriptWorkspaceProps) {
             <h2>{job.original_name}</h2>
           </div>
           <p>
-            {job.model} · {formatDuration(job.duration)} · {detectedSpeakerText}
+            {job.model} · {formatDuration(job.duration)} · {speakerCountLabel(job.speakers.length)}
           </p>
         </div>
         <span className={`status-pill ${statusTone(job.status)}`}>
@@ -79,12 +75,14 @@ function TranscriptTimeline({ job }: { job: Job }) {
     );
   }
 
+  const speakersById = new Map(job.speakers.map((speaker) => [speaker.id, speaker]));
+
   return (
-    <div className="timeline">
+    <ol className="timeline" aria-label="Transcript segments">
       {job.segments.map((segment) => {
-        const speaker = job.speakers.find((item) => item.id === segment.speaker);
+        const speaker = speakersById.get(segment.speaker);
         return (
-          <article className="segment-row" key={segment.id}>
+          <li className="segment-row" key={segment.id}>
             <div className="segment-time">
               <span>{formatClock(segment.start)}</span>
               <small>{formatClock(segment.end)}</small>
@@ -99,9 +97,9 @@ function TranscriptTimeline({ job }: { job: Job }) {
               </div>
               <p>{segment.text}</p>
             </div>
-          </article>
+          </li>
         );
       })}
-    </div>
+    </ol>
   );
 }

@@ -1,6 +1,5 @@
-import { Download } from "lucide-react";
+import { Braces, Captions, Download, FileText } from "lucide-react";
 import { exportUrl } from "../api";
-import { EXPORT_FORMATS } from "../constants";
 import { formatClock } from "../lib/format";
 import type { Job, Speaker } from "../types";
 
@@ -8,6 +7,12 @@ type SpeakerPanelProps = {
   job: Job | null;
   onRenameSpeaker: (speaker: Speaker, name: string) => void;
 };
+
+const EXPORT_ACTIONS = [
+  { format: "txt", label: "TXT", icon: FileText },
+  { format: "srt", label: "SRT", icon: Captions },
+  { format: "json", label: "JSON", icon: Braces },
+] as const;
 
 export function SpeakerPanel({ job, onRenameSpeaker }: SpeakerPanelProps) {
   return (
@@ -46,7 +51,7 @@ export function SpeakerPanel({ job, onRenameSpeaker }: SpeakerPanelProps) {
         <h2>Export</h2>
         <p>Speaker names are applied to exports at download time.</p>
         <div className="export-actions">
-          {EXPORT_FORMATS.map(({ format, label, icon: Icon }) =>
+          {EXPORT_ACTIONS.map(({ format, label, icon: Icon }) =>
             job ? (
               <a key={format} className="secondary-button" href={exportUrl(job.id, format)}>
                 <Icon size={17} />

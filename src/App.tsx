@@ -7,6 +7,7 @@ import { SpeakerPanel } from "./components/SpeakerPanel";
 import { TranscriptWorkspace } from "./components/TranscriptWorkspace";
 import { UploadPanel } from "./components/UploadPanel";
 import { DEFAULT_TRANSCRIBE_OPTIONS } from "./constants";
+import { canPollJob } from "./lib/presentation";
 import type { Job, Speaker, TranscribeOptions } from "./types";
 
 function App() {
@@ -45,7 +46,7 @@ function App() {
   }, []);
 
   useEffect(() => {
-    if (!activeJob || !["queued", "running"].includes(activeJob.status)) {
+    if (!canPollJob(activeJob)) {
       return;
     }
 
