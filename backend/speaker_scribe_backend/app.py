@@ -3,6 +3,8 @@ from __future__ import annotations
 import os
 import re
 import threading
+from dataclasses import dataclass
+from datetime import UTC
 from datetime import datetime
 from pathlib import Path
 from uuid import uuid4
@@ -27,8 +29,19 @@ from .pipeline import create_transcriber
 from .pipeline import ml_ready
 from .store import JobStore
 
-DATA_ROOT = Path(os.getenv("SPEAKER_SCRIBE_DATA", "data")).resolve()
-MAX_UPLOAD_MB = int(os.getenv("SPEAKER_SCRIBE_MAX_UPLOAD_MB", "500"))
+
+@dataclass(frozen=True)
+class AppSettings:
+    data_root: Path
+    max_upload_mb: int
+
+    @classmethod
+    def from_env(cls) -> "AppSettings":
+        return cls(
+            data_root=Path(os.getenv("SPEAKER_SCRIBE_DATA", "data")).resolve(),
+            max_upload_mb=int(os.getenv("SPEAKER_SCRIBE_MAX_UPLOAD_MB", "500")),
+        )
+
 
 app = FastAPI(title="Speaker Scribe API", version="0.1.0")
 app.add_middleware(
@@ -39,7 +52,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-store = JobStore(DATA_ROOT)
+app.state.settings = AppSettings.from_env()
+app.state.store = JobStore(app.state.settings.data_root)
 
 
 @app.get("/api/health", response_model=HealthResponse)
@@ -55,12 +69,12 @@ def health() -> HealthResponse:
 
 @app.get("/api/jobs", response_model=list[Job])
 def list_jobs() -> list[Job]:
-    return [_with_audio_url(job) for job in store.list_jobs()]
+    return [_with_audio_url(job) for job in get_store().list_jobs()]
 
 
 @app.get("/api/jobs/{job_id}", response_model=Job)
 def get_job(job_id: str) -> Job:
-    job = store.get(job_id)
+    job = get_store().get(job_id)
     if job is None:
         raise HTTPException(status_code=404, detail="Job not found")
     return _with_audio_url(job)
@@ -75,6 +89,7 @@ def create_job(
     max_speakers: int | None = Form(None),
     language: str | None = Form(None),
 ) -> Job:
+    store = get_store()
     original_name = Path(file.filename or "audio").name
     safe_name = _safe_filename(original_name)
     job_id = uuid4().hex
@@ -95,20 +110,20 @@ def create_job(
     ):
         raise HTTPException(status_code=422, detail="min_speakers cannot exceed max_speakers")
 
-    _save_upload(file, upload_path)
+    _save_upload(file, upload_path, get_settings().max_upload_mb)
 
     job = Job(
         id=job_id,
         original_name=original_name,
         filename=stored_name,
-        created_at=datetime.utcnow(),
+        created_at=datetime.now(UTC),
         model=options.model,
         diarize=options.diarize,
         language=options.language,
     )
     store.save(job)
 
-    thread = threading.Thread(target=_run_job, args=(job_id, upload_path, options), daemon=True)
+    thread = threading.Thread(target=_run_job, args=(store, job_id, upload_path, options), daemon=True)
     thread.start()
     return _with_audio_url(job)
 
@@ -124,7 +139,7 @@ def update_speakers(job_id: str, request: SpeakerRenameRequest) -> Job:
                 next_speakers.append(speaker)
         return job.model_copy(update={"speakers": next_speakers})
 
-    updated = store.mutate(job_id, mutate)
+    updated = get_store().mutate(job_id, mutate)
     if updated is None:
         raise HTTPException(status_code=404, detail="Job not found")
     return _with_audio_url(updated)
@@ -132,6 +147,7 @@ def update_speakers(job_id: str, request: SpeakerRenameRequest) -> Job:
 
 @app.get("/api/jobs/{job_id}/audio")
 def get_audio(job_id: str) -> FileResponse:
+    store = get_store()
     job = store.get(job_id)
     if job is None:
         raise HTTPException(status_code=404, detail="Job not found")
@@ -143,7 +159,7 @@ def get_audio(job_id: str) -> FileResponse:
 
 @app.get("/api/jobs/{job_id}/export")
 def export_job(job_id: str, format: str = "txt") -> Response:
-    job = store.get(job_id)
+    job = get_store().get(job_id)
     if job is None:
         raise HTTPException(status_code=404, detail="Job not found")
 
@@ -157,7 +173,12 @@ def export_job(job_id: str, format: str = "txt") -> Response:
     raise HTTPException(status_code=422, detail="format must be txt, srt, or json")
 
 
-def _run_job(job_id: str, upload_path: Path, options: TranscribeOptions) -> None:
+def _run_job(
+    store: JobStore,
+    job_id: str,
+    upload_path: Path,
+    options: TranscribeOptions,
+) -> None:
     def update(progress: float, stage: str) -> None:
         store.mutate(
             job_id,
@@ -211,19 +232,27 @@ def _safe_filename(filename: str) -> str:
     return stem or "audio"
 
 
-def _save_upload(file: UploadFile, destination: Path) -> None:
+def _save_upload(file: UploadFile, destination: Path, max_upload_mb: int) -> None:
     destination.parent.mkdir(parents=True, exist_ok=True)
     size = 0
-    limit = MAX_UPLOAD_MB * 1024 * 1024
+    limit = max_upload_mb * 1024 * 1024
     with destination.open("wb") as output:
         while chunk := file.file.read(1024 * 1024):
             size += len(chunk)
             if size > limit:
                 output.close()
                 destination.unlink(missing_ok=True)
-                raise HTTPException(status_code=413, detail=f"Upload exceeds {MAX_UPLOAD_MB} MB")
+                raise HTTPException(status_code=413, detail=f"Upload exceeds {max_upload_mb} MB")
             output.write(chunk)
     file.file.close()
     if destination.stat().st_size == 0:
         destination.unlink(missing_ok=True)
         raise HTTPException(status_code=422, detail="Audio file is empty")
+
+
+def get_settings() -> AppSettings:
+    return app.state.settings
+
+
+def get_store() -> JobStore:
+    return app.state.store
