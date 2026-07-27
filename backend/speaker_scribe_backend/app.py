@@ -54,6 +54,8 @@ app.add_middleware(
 
 app.state.settings = AppSettings.from_env()
 app.state.store = JobStore(app.state.settings.data_root)
+# Worker threads do not survive a restart, so anything still in flight is dead.
+app.state.store.fail_interrupted_jobs()
 
 
 @app.get("/api/health", response_model=HealthResponse)

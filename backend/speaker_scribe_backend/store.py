@@ -11,6 +11,8 @@ from .models import Job
 
 JobMutator = Callable[[Job], Job]
 
+INTERRUPTED_ERROR = "Job was interrupted by a server restart."
+
 
 class JobStore:
     def __init__(self, root: Path) -> None:
@@ -47,6 +49,32 @@ class JobStore:
                     self._write_jobs(jobs)
                     return updated
         return None
+
+    def fail_interrupted_jobs(self) -> list[str]:
+        """Mark jobs left mid-flight by a previous process as failed.
+
+        A job's progress lives only in its worker thread, so a restart orphans
+        anything still queued or running. Without this sweep those jobs stay
+        `running` forever and the UI polls them indefinitely.
+        """
+        with self._lock:
+            jobs = self._read_jobs()
+            interrupted: list[str] = []
+            for index, job in enumerate(jobs):
+                if job.status not in ("queued", "running"):
+                    continue
+                jobs[index] = job.model_copy(
+                    update={
+                        "status": "failed",
+                        "progress": 1,
+                        "stage": "Transcript failed",
+                        "error": INTERRUPTED_ERROR,
+                    }
+                )
+                interrupted.append(job.id)
+            if interrupted:
+                self._write_jobs(jobs)
+        return interrupted
 
     def _read_jobs(self) -> list[Job]:
         if not self.jobs_path.exists():
