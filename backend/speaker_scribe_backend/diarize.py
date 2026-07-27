@@ -35,6 +35,27 @@ MIN_WINDOW_SECONDS = 0.6
 # Turns from the same speaker separated by less than this are one turn.
 MERGE_GAP_SECONDS = 0.4
 
+# A turn shorter than this, with the same other speaker on both sides, is
+# treated as a diarization slip rather than a real interjection. Chosen from
+# measured output: on a 43-minute panel the misattributed fragments ran 0.3s to
+# 1.4s, while the shortest genuine turn was around 20s. The cost is that a real
+# one-word backchannel is credited to whoever holds the floor, which reads
+# better than inventing a speaker for it.
+SLIVER_SECONDS = 2.0
+
+# A speaker credited with less than this in total, and a negligible share of the
+# conversation, is a leftover of clustering rather than a participant.
+#
+# This only became safe once slivers were absorbed. Applied first it would have
+# deleted a real person: on the reference panel one "speaker" was a mixture of
+# three misattributed fragments and one genuine 20-second question, and a mass
+# floor cannot tell those apart. After the sliver pass the same recording splits
+# 1493s / 497s / 485s / 18s / 0.4s, where the smallest real voice outweighs the
+# phantom 45 to 1. Both conditions must hold, so a brief but real contributor to
+# a short recording keeps their share.
+MIN_SPEAKER_SECONDS = 5.0
+MIN_SPEAKER_SHARE = 0.01
+
 DEFAULT_MAX_SPEAKERS = 8
 
 # Below this silhouette score the embedding cloud has no real cluster structure,
@@ -159,7 +180,58 @@ def merge_turns(windows: list[tuple[float, float]], labels: list[int]) -> list[S
             turns[-1] = SpeakerTurn(previous.start, max(previous.end, end), speaker)
         else:
             turns.append(SpeakerTurn(start, end, speaker))
-    return split_overlaps(turns)
+    return split_overlaps(absorb_minor_speakers(absorb_slivers(turns)))
+
+
+def coalesce(turns: list[SpeakerTurn]) -> list[SpeakerTurn]:
+    """Join neighbouring turns that name the same speaker."""
+    joined: list[SpeakerTurn] = []
+    for turn in turns:
+        if joined and joined[-1].speaker == turn.speaker and turn.start <= joined[-1].end + MERGE_GAP_SECONDS:
+            previous = joined[-1]
+            joined[-1] = SpeakerTurn(previous.start, max(previous.end, turn.end), turn.speaker)
+        else:
+            joined.append(turn)
+    return joined
+
+
+def absorb_slivers(turns: list[SpeakerTurn]) -> list[SpeakerTurn]:
+    """Reassign momentary turns that interrupt one continuous speaker.
+
+    Clustering occasionally drops a window or two of a long turn into another
+    speaker, which surfaces as a phantom participant credited with a second of
+    speech. A turn only counts as a slip when the *same* speaker holds the floor
+    on both sides of it, so a genuine short exchange between two people is left
+    alone.
+    """
+    current = list(turns)
+    for _ in range(len(current) or 1):  # bounded: each pass strictly reduces turn count
+        changed = False
+        index = 1
+        while index < len(current) - 1:
+            stop, span = index, 0.0
+            # Gather a run of consecutive brief turns totalling under the threshold,
+            # so two different slivers back to back are handled as one interruption.
+            while stop < len(current) - 1:
+                length = current[stop].end - current[stop].start
+                if length >= SLIVER_SECONDS or span + length >= SLIVER_SECONDS:
+                    break
+                span += length
+                stop += 1
+
+            host = current[index - 1].speaker
+            if stop > index and current[stop].speaker == host and all(
+                turn.speaker != host for turn in current[index:stop]
+            ):
+                for position in range(index, stop):
+                    current[position] = replace(current[position], speaker=host)
+                changed = True
+            index = max(stop, index + 1)
+
+        if not changed:
+            return current
+        current = coalesce(current)
+    return current
 
 
 def split_overlaps(turns: list[SpeakerTurn]) -> list[SpeakerTurn]:
@@ -178,6 +250,56 @@ def split_overlaps(turns: list[SpeakerTurn]) -> list[SpeakerTurn]:
             turns[index] = replace(current, end=boundary)
             turns[index + 1] = replace(following, start=boundary)
     return turns
+
+
+def absorb_minor_speakers(turns: list[SpeakerTurn]) -> list[SpeakerTurn]:
+    """Fold away voices too small to be participants.
+
+    A turn's length is a poor test on its own: windows are 1.5s wide, so a
+    phantom can hold a two-second turn containing a fraction of a second of
+    speech. Judging a speaker by everything they are credited with across the
+    whole recording catches that, and runs after `absorb_slivers` so the totals
+    it sees are no longer inflated by misattributed fragments.
+    """
+    totals: dict[str, float] = defaultdict(float)
+    for turn in turns:
+        totals[turn.speaker] += max(0.0, turn.end - turn.start)
+
+    overall = sum(totals.values())
+    if overall <= 0 or len(totals) < 2:
+        return turns
+
+    minor = {
+        speaker
+        for speaker, total in totals.items()
+        if total < MIN_SPEAKER_SECONDS and total / overall < MIN_SPEAKER_SHARE
+    }
+    # Never fold every voice away; something has to hold the floor.
+    if not minor or len(minor) >= len(totals):
+        return turns
+
+    current = list(turns)
+    for index, turn in enumerate(current):
+        if turn.speaker not in minor:
+            continue
+        host = _nearest_major_speaker(current, index, minor)
+        if host is not None:
+            current[index] = replace(turn, speaker=host)
+    return coalesce(current)
+
+
+def _nearest_major_speaker(
+    turns: list[SpeakerTurn], index: int, minor: set[str]
+) -> str | None:
+    """The closest surviving voice either side, preferring the one before."""
+    for offset in range(1, len(turns)):
+        before = index - offset
+        if before >= 0 and turns[before].speaker not in minor:
+            return turns[before].speaker
+        after = index + offset
+        if after < len(turns) and turns[after].speaker not in minor:
+            return turns[after].speaker
+    return None
 
 
 def assign_speakers(result: dict[str, Any], turns: list[SpeakerTurn]) -> dict[str, Any]:
