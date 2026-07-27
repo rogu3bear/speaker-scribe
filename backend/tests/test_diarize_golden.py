@@ -41,8 +41,12 @@ FIXTURE_DIR = REPO_ROOT / "data" / "fixtures"
 GOLDEN_PATH = FIXTURE_DIR / "diarization-golden.json"
 
 SAMPLE_STEP_SECONDS = 1.0
-MIN_TIMELINE_AGREEMENT = 0.98
 SPEAKER_SECONDS_TOLERANCE = 0.02
+
+# The pipeline is deterministic — repeated runs agree exactly — so this only has
+# to leave room for dependency drift, not for run-to-run noise. At 0.98 it was
+# inert: a 17% change to WINDOW_SECONDS still scored 0.9839 and passed.
+MIN_TIMELINE_AGREEMENT = 0.99
 
 # Recorded alongside the golden so a drop in agreement can be explained by
 # looking at what actually moved.
@@ -154,6 +158,16 @@ def test_diarization_matches_the_recorded_baseline() -> None:
         for name, now in current_constants().items()
         if (was := golden.get("constants", {}).get(name)) != now
     }
+
+    # Assert the configuration directly. Comparing output alone cannot cover the
+    # constants reliably: a clean two-speaker recording sits nowhere near
+    # MIN_SPEAKER_DISTANCE or SINGLE_SPEAKER_SILHOUETTE, so loosening either
+    # changes nothing observable. This makes every tracked constant guarded.
+    assert not changed, (
+        f"tracked diarization constants changed: {changed}. The baseline no longer "
+        "describes this configuration. Regenerate it with "
+        "SPEAKER_SCRIBE_WRITE_GOLDEN=1 if the change is intended."
+    )
 
     expected_seconds = golden["speaker_seconds"]
     actual_seconds = speaker_seconds(turns)
