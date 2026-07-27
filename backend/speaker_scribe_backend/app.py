@@ -30,6 +30,7 @@ from .models import TranscribeOptions
 from .pipeline import create_transcriber
 from .pipeline import ml_ready
 from .store import JobStore
+from .transcript import with_clean_text
 
 
 @dataclass(frozen=True)
@@ -236,7 +237,13 @@ def _run_job(
 
 
 def _with_audio_url(job: Job) -> Job:
-    return job.model_copy(update={"audio_url": f"/api/jobs/{job.id}/audio"})
+    """Shape a stored job for the API: derived fields are added here, not persisted."""
+    return job.model_copy(
+        update={
+            "audio_url": f"/api/jobs/{job.id}/audio",
+            "segments": with_clean_text(job.segments),
+        }
+    )
 
 
 def _safe_filename(filename: str) -> str:

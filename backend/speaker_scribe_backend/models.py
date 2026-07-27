@@ -24,8 +24,9 @@ class TranscriptSegment(BaseModel):
     start: float = Field(ge=0)
     end: float = Field(ge=0)
     text: str
-    # Tidied for reading. `text` stays verbatim because that is the record of what
-    # was actually said. Empty on jobs transcribed before cleanup existed.
+    # Tidied for reading, derived on read and never persisted: see
+    # transcript.with_clean_text. `text` stays verbatim because that is the record
+    # of what was actually said.
     clean_text: str = ""
     speaker: str = "SPEAKER_00"
 

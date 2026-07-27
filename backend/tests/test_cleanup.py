@@ -56,6 +56,27 @@ def test_clean_text_capitalizes_the_opening_word() -> None:
     )
 
 
+@pytest.mark.parametrize(
+    ("verbatim", "expected"),
+    [
+        ("we save you $100,000.", "We save you $100,000."),
+        ("about 3.5 percent", "About 3.5 percent"),
+        ("that's 1,250 users", "That's 1,250 users"),
+        ("roughly 40% of them", "Roughly 40% of them"),
+    ],
+)
+def test_clean_text_keeps_numbers_and_currency_intact(verbatim: str, expected: str) -> None:
+    assert clean_text(verbatim) == expected
+
+
+def test_clean_text_leaves_a_continuing_fragment_lowercase() -> None:
+    """Whisper splits mid-sentence; capitalizing every split breaks the paragraph."""
+    assert clean_text("your response is not the point", starts_sentence=False) == (
+        "your response is not the point"
+    )
+    assert clean_text("your response is not the point") == "Your response is not the point"
+
+
 def test_clean_text_returns_empty_for_pure_filler() -> None:
     assert clean_text("um uh hmm") == ""
     assert clean_text("") == ""

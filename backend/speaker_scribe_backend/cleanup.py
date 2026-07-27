@@ -57,9 +57,20 @@ SENTENCE_END = re.compile(r"[.!?]$")
 SEPARATORS = frozenset({",", ";", ":"})
 TERMINATORS = frozenset({".", "!", "?"})
 
+# Punctuation that hugs the token before it.
+ATTACHES_LEFT = SEPARATORS | TERMINATORS | frozenset({"%", ")", "]", "}"})
+# Symbols that hug the token after them, so "$100" does not become "$ 100".
+ATTACHES_RIGHT = frozenset({"(", "[", "{", "$", "#", "@", "£", "€"})
 
-def clean_text(text: str) -> str:
-    """Tidy one segment of verbatim speech for reading."""
+
+def clean_text(text: str, *, starts_sentence: bool = True) -> str:
+    """Tidy one segment of verbatim speech for reading.
+
+    `starts_sentence` is False when the previous segment of the same speaker
+    trailed off without terminal punctuation. Whisper splits mid-sentence, so
+    capitalizing every segment would put a capital in the middle of a sentence
+    once the turn is joined into a paragraph.
+    """
     tokens = WORD_PATTERN.findall(text or "")
     if not tokens:
         return ""
@@ -73,7 +84,7 @@ def clean_text(text: str) -> str:
         return ""
 
     rendered = _render(kept)
-    return _capitalize(rendered)
+    return _capitalize(rendered) if starts_sentence else rendered
 
 
 def is_sentence_end(text: str) -> bool:
@@ -154,20 +165,30 @@ def _drop_leading_phrases(tokens: list[str]) -> list[str]:
     return tokens
 
 
+def _within_number(tokens: list[str], index: int) -> bool:
+    """Whether tokens[index] continues a number, as in the 000 of '100,000'."""
+    return (
+        index >= 2
+        and tokens[index].isdigit()
+        and tokens[index - 1] in {",", "."}
+        and tokens[index - 2].isdigit()
+    )
+
+
 def _render(tokens: list[str]) -> str:
-    out = ""
-    for token in tokens:
-        if not out:
-            out = token
-        elif token in {",", ".", "!", "?", ":", ";", "%", ")", "]", "}"}:
-            out += token
-        elif out[-1] in {"(", "[", "{"}:
-            out += token
-        elif token == "'" or token.startswith("'"):
-            out += token
-        else:
-            out += " " + token
-    return out.strip()
+    parts: list[str] = []
+    for index, token in enumerate(tokens):
+        if index == 0:
+            parts.append(token)
+            continue
+        joins = (
+            token in ATTACHES_LEFT
+            or token.startswith("'")
+            or tokens[index - 1] in ATTACHES_RIGHT
+            or _within_number(tokens, index)
+        )
+        parts.append(token if joins else " " + token)
+    return "".join(parts).strip()
 
 
 def _capitalize(text: str) -> str:

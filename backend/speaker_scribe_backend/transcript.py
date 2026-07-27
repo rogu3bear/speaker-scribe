@@ -5,6 +5,7 @@ from collections.abc import Iterable
 from typing import Any
 
 from .cleanup import clean_text
+from .cleanup import is_sentence_end
 from .models import Speaker
 from .models import TranscriptSegment
 
@@ -12,14 +13,39 @@ from .models import TranscriptSegment
 def build_segment(
     segment_id: str, start: float, end: float, text: str, speaker: str
 ) -> TranscriptSegment:
+    """Build a stored segment. `clean_text` is derived on read, never persisted."""
     return TranscriptSegment(
         id=segment_id,
         start=round(start, 2),
         end=round(end, 2),
         text=text,
-        clean_text=clean_text(text),
         speaker=speaker,
     )
+
+
+def with_clean_text(segments: list[TranscriptSegment]) -> list[TranscriptSegment]:
+    """Derive the tidied rendering of each segment.
+
+    Cleanup is applied here rather than at transcription time so that improving a
+    rule improves every transcript already on disk, including ones recorded before
+    the rule existed. Storing it instead would freeze each transcript against
+    whatever the rules happened to be the day it was made, and would make tuning
+    them cost a full re-transcription.
+    """
+    derived: list[TranscriptSegment] = []
+    for index, segment in enumerate(segments):
+        previous = segments[index - 1] if index else None
+        continues = (
+            previous is not None
+            and previous.speaker == segment.speaker
+            and not is_sentence_end(previous.text)
+        )
+        derived.append(
+            segment.model_copy(
+                update={"clean_text": clean_text(segment.text, starts_sentence=not continues)}
+            )
+        )
+    return derived
 
 SPEAKER_COLORS = [
     "#0f766e",
