@@ -41,7 +41,7 @@ def build_speakers(segments: Iterable[TranscriptSegment]) -> list[Speaker]:
     return speakers
 
 
-def normalize_whispermlx_result(result: dict[str, Any]) -> tuple[list[TranscriptSegment], float | None]:
+def normalize_transcription_result(result: dict[str, Any]) -> tuple[list[TranscriptSegment], float | None]:
     raw_segments = result.get("segments") or []
     normalized: list[TranscriptSegment] = []
 

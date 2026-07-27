@@ -1,19 +1,43 @@
 from __future__ import annotations
 
+import importlib.util
 import os
+import shutil
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
+from .diarize import LocalDiarizer
+from .diarize import assign_speakers
 from .models import Speaker
 from .models import TranscribeOptions
 from .models import TranscriptSegment
 from .transcript import build_speakers
-from .transcript import normalize_whispermlx_result
+from .transcript import normalize_transcription_result
 
 ProgressCallback = Callable[[float, str], None]
+
+# mlx-whisper loads weights by Hugging Face repo id, so the short names the UI
+# offers are mapped onto their MLX conversions. Anything else is passed through,
+# which lets a user paste any mlx-community repo id.
+MLX_MODEL_ALIASES = {
+    "tiny": "mlx-community/whisper-tiny-mlx",
+    "base": "mlx-community/whisper-base-mlx",
+    "small": "mlx-community/whisper-small-mlx",
+    "medium": "mlx-community/whisper-medium-mlx",
+    "large-v3": "mlx-community/whisper-large-v3-mlx",
+    "large-v3-turbo": "mlx-community/whisper-large-v3-turbo",
+}
+
+# Everything the real engine needs, checked without importing the heavy modules.
+REQUIRED_MODULES = [
+    ("mlx_whisper", "mlx-whisper"),
+    ("silero_vad", "silero-vad"),
+    ("speechbrain", "speechbrain"),
+    ("sklearn", "scikit-learn"),
+]
 
 
 @dataclass(frozen=True)
@@ -37,7 +61,13 @@ class Transcriber(Protocol):
         ...
 
 
-class WhisperMlxTranscriber:
+def resolve_model(model: str) -> str:
+    return MLX_MODEL_ALIASES.get(model, model)
+
+
+class MlxWhisperTranscriber:
+    """MLX Whisper transcription plus local, account-free diarization."""
+
     def transcribe(
         self,
         audio_path: Path,
@@ -45,55 +75,40 @@ class WhisperMlxTranscriber:
         progress: ProgressCallback,
     ) -> TranscriptionResult:
         try:
-            import whispermlx
+            import mlx_whisper
         except ImportError as exc:
             raise RuntimeError(
-                "whispermlx is not installed. Run `uv sync --extra ml --python 3.13` "
-                "on Apple Silicon before starting real transcription."
+                "mlx-whisper is not installed. Run `uv sync --extra ml` on Apple Silicon "
+                "before starting real transcription."
             ) from exc
 
-        progress(0.08, "Loading MLX Whisper model")
-        model = whispermlx.load_model(options.model, device="cpu")
+        if shutil.which("ffmpeg") is None:
+            raise RuntimeError(
+                "ffmpeg was not found on PATH. Install it with `brew install ffmpeg` "
+                "before starting real transcription."
+            )
 
-        progress(0.18, "Transcribing audio with MLX Whisper")
-        transcribe_kwargs: dict[str, str] = {}
+        progress(0.1, "Loading MLX Whisper model")
+        transcribe_kwargs: dict[str, object] = {"word_timestamps": True}
         if options.language:
             transcribe_kwargs["language"] = options.language
-        result = model.transcribe(str(audio_path), **transcribe_kwargs)
+
+        progress(0.18, "Transcribing audio with MLX Whisper")
+        result = mlx_whisper.transcribe(
+            str(audio_path),
+            path_or_hf_repo=resolve_model(options.model),
+            **transcribe_kwargs,
+        )
+        language = str(result.get("language") or options.language or "") or None
 
         if options.diarize:
-            token = os.getenv("HUGGINGFACE_TOKEN") or os.getenv("HF_TOKEN")
-            if not token:
-                raise RuntimeError(
-                    "Speaker diarization requires HUGGINGFACE_TOKEN or HF_TOKEN with access "
-                    "to the pyannote diarization model."
-                )
-
-            language = str(result.get("language") or options.language or "en")
-            progress(0.52, "Aligning words for speaker attribution")
-            model_a, metadata = whispermlx.load_align_model(language_code=language, device="cpu")
-            result = whispermlx.align(result["segments"], model_a, metadata, str(audio_path), device="cpu")
-
-            progress(0.72, "Detecting speaker turns with pyannote")
-            from whispermlx.diarize import DiarizationPipeline
-
-            diarize_model = DiarizationPipeline(token=token, device="cpu")
-            diarize_kwargs: dict[str, int] = {}
-            if options.min_speakers is not None:
-                diarize_kwargs["min_speakers"] = options.min_speakers
-            if options.max_speakers is not None:
-                diarize_kwargs["max_speakers"] = options.max_speakers
-
-            diarize_segments = diarize_model(str(audio_path), **diarize_kwargs)
-            result = whispermlx.assign_word_speakers(diarize_segments, result)
+            progress(0.5, "Preparing audio for speaker analysis")
+            turns = LocalDiarizer().diarize(audio_path, options, progress)
+            result = assign_speakers(result, turns)
 
         progress(0.9, "Normalizing transcript segments")
-        segments, duration = normalize_whispermlx_result(result)
-        return TranscriptionResult(
-            segments=segments,
-            duration=duration,
-            language=str(result.get("language") or options.language or "") or None,
-        )
+        segments, duration = normalize_transcription_result(result)
+        return TranscriptionResult(segments=segments, duration=duration, language=language)
 
 
 class MockTranscriber:
@@ -128,23 +143,32 @@ class MockTranscriber:
                 start=5.1,
                 end=9.6,
                 speaker="SPEAKER_01" if options.diarize else "SPEAKER_00",
-                text="Install the ML extra to run whispermlx and pyannote on real audio.",
+                text="Install the ML extra to run MLX Whisper and local diarization on real audio.",
             ),
         ]
         return TranscriptionResult(segments=segments, duration=9.6, language=options.language or "en")
 
 
+def engine_name() -> str:
+    return os.getenv("SPEAKER_SCRIBE_ENGINE", "mlx").lower()
+
+
 def create_transcriber() -> Transcriber:
-    if os.getenv("SPEAKER_SCRIBE_ENGINE", "mlx").lower() == "mock":
+    if engine_name() == "mock":
         return MockTranscriber()
-    return WhisperMlxTranscriber()
+    return MlxWhisperTranscriber()
 
 
 def ml_ready() -> tuple[bool, str | None]:
-    if os.getenv("SPEAKER_SCRIBE_ENGINE", "mlx").lower() == "mock":
+    """Report whether a real run can start, and what is missing if it cannot."""
+    if engine_name() == "mock":
         return True, "mock engine selected"
-    try:
-        import whispermlx  # noqa: F401
-    except ImportError:
-        return False, "whispermlx not installed"
+
+    missing = [
+        name for module, name in REQUIRED_MODULES if importlib.util.find_spec(module) is None
+    ]
+    if missing:
+        return False, f"missing packages: {', '.join(missing)} — run `uv sync --extra ml`"
+    if shutil.which("ffmpeg") is None:
+        return False, "ffmpeg not found on PATH — run `brew install ffmpeg`"
     return True, None
