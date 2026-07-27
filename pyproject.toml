@@ -27,6 +27,18 @@ ml = [
   # Used directly by catalog.py to read and manage the model cache. It arrives
   # transitively too, but relying on that leaves the dependency undeclared.
   "huggingface-hub>=0.30; python_version < '3.14'",
+  # Security floors on packages we only get transitively.
+  #
+  # torch < 2.10 carries PYSEC-2026-2286: a crafted checkpoint can corrupt memory
+  # through the `weights_only` unpickler, up to arbitrary code execution. That is
+  # not theoretical here -- SpeechBrain calls torch.load on downloaded ECAPA
+  # weights on every diarization run. Seven further advisories against 2.8.0 are
+  # memory corruption in ops this app never calls, and are fixed by the same bump.
+  "torch>=2.10; python_version < '3.14'",
+  "torchaudio>=2.10; python_version < '3.14'",
+  # setuptools < 83 fails to normalize Unicode when applying MANIFEST.in excludes,
+  # so an NFD filename can slip past an NFC exclude rule into a published sdist.
+  "setuptools>=83; python_version < '3.14'",
 ]
 test = [
   "httpx>=0.28.0",
