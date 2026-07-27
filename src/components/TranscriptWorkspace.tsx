@@ -1,6 +1,6 @@
 import { Captions, CheckCircle2, FileAudio, Loader2, PlayCircle } from "lucide-react";
 import { formatClock, formatDuration, progressLabel } from "../lib/format";
-import { speakerCountLabel, statusTone } from "../lib/presentation";
+import { groupSegmentsBySpeaker, speakerCountLabel, statusTone } from "../lib/presentation";
 import type { Job } from "../types";
 
 type TranscriptWorkspaceProps = {
@@ -76,16 +76,17 @@ function TranscriptTimeline({ job }: { job: Job }) {
   }
 
   const speakersById = new Map(job.speakers.map((speaker) => [speaker.id, speaker]));
+  const turns = groupSegmentsBySpeaker(job.segments);
 
   return (
-    <ol className="timeline" aria-label="Transcript segments">
-      {job.segments.map((segment) => {
-        const speaker = speakersById.get(segment.speaker);
+    <ol className="timeline" aria-label="Transcript speaker turns">
+      {turns.map((turn) => {
+        const speaker = speakersById.get(turn.speaker);
         return (
-          <li className="segment-row" key={segment.id}>
+          <li className="segment-row" key={turn.id}>
             <div className="segment-time">
-              <span>{formatClock(segment.start)}</span>
-              <small>{formatClock(segment.end)}</small>
+              <span>{formatClock(turn.start)}</span>
+              <small>{formatClock(turn.end)}</small>
             </div>
             <div className="segment-body">
               <div className="segment-speaker">
@@ -93,9 +94,11 @@ function TranscriptTimeline({ job }: { job: Job }) {
                   className="speaker-swatch"
                   style={{ backgroundColor: speaker?.color ?? "#64748b" }}
                 />
-                <strong>{speaker?.name ?? segment.speaker}</strong>
+                <strong>{speaker?.name ?? turn.speaker}</strong>
               </div>
-              <p>{segment.text}</p>
+              {turn.segments.map((segment) => (
+                <p key={segment.id}>{segment.text}</p>
+              ))}
             </div>
           </li>
         );
