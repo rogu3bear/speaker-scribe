@@ -1,4 +1,10 @@
-import type { Health, Job, SpeakerRenameRequest, TranscribeOptions } from "./types";
+import type {
+  Health,
+  Job,
+  JobCollection,
+  SpeakerRenameRequest,
+  TranscribeOptions,
+} from "./types";
 
 const API_BASE = import.meta.env.VITE_API_BASE ?? "";
 
@@ -64,6 +70,19 @@ export async function renameSpeakers(
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
+  });
+  return parseJson<Job>(response);
+}
+
+export async function fileJob(
+  id: string,
+  collection: JobCollection,
+  title?: string,
+): Promise<Job> {
+  const response = await fetch(`${API_BASE}/api/jobs/${id}/collection`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(title === undefined ? { collection } : { collection, title }),
   });
   return parseJson<Job>(response);
 }

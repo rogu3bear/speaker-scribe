@@ -1,5 +1,8 @@
 export type JobStatus = "queued" | "running" | "completed" | "failed";
 
+/** Where a job is filed. Filing moves it, so a transcript has one home. */
+export type JobCollection = "inbox" | "saved" | "archived";
+
 export type TranscribeOptions = {
   model: string;
   diarize: boolean;
@@ -32,6 +35,8 @@ export type Job = {
   filename: string;
   created_at: string;
   status: JobStatus;
+  collection?: JobCollection;
+  title?: string | null;
   progress: number;
   stage: string;
   error?: string | null;

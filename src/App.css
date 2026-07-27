@@ -328,19 +328,77 @@ button:disabled {
   padding: 12px;
 }
 
+.collection-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-bottom: 10px;
+}
+
+.collection-tab {
+  align-items: center;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  color: var(--muted);
+  cursor: pointer;
+  display: inline-flex;
+  font-size: 12px;
+  font-weight: 620;
+  gap: 5px;
+  padding: 5px 10px;
+}
+
+.collection-tab:hover {
+  color: var(--text);
+}
+
+.collection-tab.selected {
+  background: #fff;
+  border-color: var(--line);
+  color: var(--text);
+}
+
+.collection-count {
+  background: var(--surface-3);
+  border-radius: 999px;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  padding: 0 5px;
+}
+
 .job-item {
   align-items: flex-start;
   background: transparent;
   border: 1px solid transparent;
   border-radius: var(--radius);
   color: var(--text);
+  display: flex;
+  gap: 6px;
+  min-width: 0;
+  padding: 10px;
+  width: 100%;
+}
+
+.job-open {
+  align-items: flex-start;
+  background: transparent;
+  border: 0;
+  color: inherit;
+  cursor: pointer;
   display: grid;
+  flex: 1 1 auto;
   gap: 10px;
   grid-template-columns: 10px 1fr;
   min-width: 0;
-  padding: 10px;
+  padding: 0;
   text-align: left;
-  width: 100%;
+}
+
+.job-actions {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 2px;
 }
 
 .job-item strong,
@@ -503,6 +561,14 @@ button:disabled {
   grid-template-columns: 70px 1fr;
   min-width: 0;
   padding: 14px;
+}
+
+.field-hint {
+  color: var(--muted);
+  display: block;
+  font-size: 12px;
+  line-height: 1.45;
+  margin-top: 6px;
 }
 
 .workspace-actions {

@@ -23,8 +23,10 @@ from fastapi.responses import Response
 from .exporters import export_json
 from .exporters import export_srt
 from .exporters import export_txt
+from .models import FileJobRequest
 from .models import HealthResponse
 from .models import Job
+from .models import JobCollection
 from .models import SpeakerRenameRequest
 from .models import TranscribeOptions
 from .pipeline import create_transcriber
@@ -81,8 +83,11 @@ def health() -> HealthResponse:
 
 
 @app.get("/api/jobs", response_model=list[Job])
-def list_jobs() -> list[Job]:
-    return [_with_audio_url(job) for job in get_store().list_jobs()]
+def list_jobs(collection: JobCollection | None = None) -> list[Job]:
+    jobs = get_store().list_jobs()
+    if collection is not None:
+        jobs = [job for job in jobs if job.collection == collection]
+    return [_with_audio_url(job) for job in jobs]
 
 
 @app.get("/api/jobs/{job_id}", response_model=Job)
@@ -151,6 +156,22 @@ def update_speakers(job_id: str, request: SpeakerRenameRequest) -> Job:
             else:
                 next_speakers.append(speaker)
         return job.model_copy(update={"speakers": next_speakers})
+
+    updated = get_store().mutate(job_id, mutate)
+    if updated is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return _with_audio_url(updated)
+
+
+@app.patch("/api/jobs/{job_id}/collection", response_model=Job)
+def file_job(job_id: str, request: FileJobRequest) -> Job:
+    """Move a job between the inbox, saved conversations, and the archive."""
+
+    def mutate(job: Job) -> Job:
+        update: dict[str, object] = {"collection": request.collection}
+        if request.title is not None:
+            update["title"] = request.title.strip() or None
+        return job.model_copy(update=update)
 
     updated = get_store().mutate(job_id, mutate)
     if updated is None:

@@ -1,6 +1,6 @@
 import { Loader2, UploadCloud } from "lucide-react";
 import type { ChangeEvent, FormEvent } from "react";
-import { MODEL_OPTIONS } from "../constants";
+import { MODEL_OPTIONS, modelOption } from "../constants";
 import type { TranscribeOptions } from "../types";
 
 type UploadPanelProps = {
@@ -40,10 +40,11 @@ export function UploadPanel({
         >
           {MODEL_OPTIONS.map((model) => (
             <option key={model.value} value={model.value}>
-              {model.label}
+              {model.label} · {model.size} · {model.speed}
             </option>
           ))}
         </select>
+        <ModelHint value={options.model} />
       </label>
 
       <label className="switch-row">
@@ -83,6 +84,18 @@ export function UploadPanel({
         Start transcript
       </button>
     </form>
+  );
+}
+
+function ModelHint({ value }: { value: string }) {
+  const model = modelOption(value);
+  if (!model) {
+    return <small className="field-hint">Custom model — passed to MLX Whisper as given.</small>;
+  }
+  return (
+    <small className="field-hint">
+      {model.hint} Downloads once ({model.size}), then cached.
+    </small>
   );
 }
 

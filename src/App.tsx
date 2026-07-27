@@ -1,14 +1,14 @@
 import { AlertTriangle, Mic2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { ChangeEvent, FormEvent } from "react";
-import { fetchHealth, fetchJob, fetchJobs, renameSpeakers, uploadAudio } from "./api";
+import { fetchHealth, fetchJob, fetchJobs, fileJob, renameSpeakers, uploadAudio } from "./api";
 import { JobList } from "./components/JobList";
 import { SpeakerPanel } from "./components/SpeakerPanel";
 import { TranscriptWorkspace } from "./components/TranscriptWorkspace";
 import { UploadPanel } from "./components/UploadPanel";
 import { DEFAULT_TRANSCRIBE_OPTIONS } from "./constants";
 import { canPollJob } from "./lib/presentation";
-import type { Health, Job, Speaker, TranscribeOptions } from "./types";
+import type { Health, Job, JobCollection, Speaker, TranscribeOptions } from "./types";
 
 function App() {
   const [jobs, setJobs] = useState<Job[]>([]);
@@ -18,6 +18,7 @@ function App() {
   const [uploading, setUploading] = useState(false);
   const [apiNotice, setApiNotice] = useState<string | null>(null);
   const [health, setHealth] = useState<Health | null>(null);
+  const [collection, setCollection] = useState<JobCollection>("inbox");
 
   const activeJob = jobs.find((job) => job.id === activeJobId) ?? null;
 
@@ -102,6 +103,15 @@ function App() {
     }
   }
 
+  async function moveJob(job: Job, next: JobCollection) {
+    try {
+      replaceJob(await fileJob(job.id, next));
+      setApiNotice(null);
+    } catch (error) {
+      setApiNotice(error instanceof Error ? error.message : "Could not move that transcript");
+    }
+  }
+
   async function updateSpeakerName(speaker: Speaker, name: string) {
     if (!activeJob) {
       return;
@@ -161,7 +171,10 @@ function App() {
         <JobList
           jobs={jobs}
           activeJobId={activeJobId}
+          collection={collection}
           onSelectJob={setActiveJobId}
+          onSelectCollection={setCollection}
+          onFileJob={(job, next) => void moveJob(job, next)}
           onRefresh={() => void refreshJobs()}
         />
       </aside>

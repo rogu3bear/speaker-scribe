@@ -1,4 +1,19 @@
-import type { Job, JobStatus, TranscriptSegment } from "../types";
+import type { Job, JobCollection, JobStatus, TranscriptSegment } from "../types";
+
+export const COLLECTIONS: { key: JobCollection; label: string; empty: string }[] = [
+  { key: "inbox", label: "Inbox", empty: "No jobs yet." },
+  { key: "saved", label: "Conversations", empty: "Save a transcript to keep it here." },
+  { key: "archived", label: "Archive", empty: "Nothing archived." },
+];
+
+/** Jobs filed under a collection. Untagged jobs predate filing, so they are inbox. */
+export function jobsInCollection(jobs: Job[], collection: JobCollection): Job[] {
+  return jobs.filter((job) => (job.collection ?? "inbox") === collection);
+}
+
+export function jobTitle(job: Job): string {
+  return job.title?.trim() || job.original_name;
+}
 
 export type TranscriptTurn = {
   id: string;

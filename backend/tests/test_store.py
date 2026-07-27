@@ -1,4 +1,3 @@
-import json
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -9,24 +8,7 @@ from speaker_scribe_backend.store import INTERRUPTED_ERROR
 from speaker_scribe_backend.store import JobStore
 
 
-def write_jobs(root: Path, created_at: list[str], statuses: list[str] | None = None) -> None:
-    jobs = [
-        {
-            "id": f"job-{index}",
-            "original_name": f"audio-{index}.m4a",
-            "filename": f"job-{index}-audio.m4a",
-            "created_at": stamp,
-            "model": "large-v3",
-            "diarize": True,
-        }
-        for index, stamp in enumerate(created_at)
-    ]
-    for job, status in zip(jobs, statuses or []):
-        job["status"] = status
-    (root / "jobs.json").write_text(json.dumps(jobs))
-
-
-def test_list_jobs_sorts_store_with_mixed_timezone_awareness(tmp_path: Path) -> None:
+def test_list_jobs_sorts_store_with_mixed_timezone_awareness(tmp_path: Path, write_jobs) -> None:
     """Rows written before the switch to datetime.now(UTC) are naive.
 
     Sorting a store holding both naive and aware timestamps used to raise
@@ -47,7 +29,7 @@ def test_list_jobs_sorts_store_with_mixed_timezone_awareness(tmp_path: Path) -> 
     assert all(job.created_at.tzinfo is not None for job in jobs)
 
 
-def test_fail_interrupted_jobs_sweeps_queued_and_running(tmp_path: Path) -> None:
+def test_fail_interrupted_jobs_sweeps_queued_and_running(tmp_path: Path, write_jobs) -> None:
     store = JobStore(tmp_path)
     write_jobs(
         tmp_path,
@@ -65,7 +47,7 @@ def test_fail_interrupted_jobs_sweeps_queued_and_running(tmp_path: Path) -> None
         assert job.stage == "Transcript failed"
 
 
-def test_fail_interrupted_jobs_leaves_finished_jobs_alone(tmp_path: Path) -> None:
+def test_fail_interrupted_jobs_leaves_finished_jobs_alone(tmp_path: Path, write_jobs) -> None:
     store = JobStore(tmp_path)
     write_jobs(
         tmp_path,
@@ -78,7 +60,7 @@ def test_fail_interrupted_jobs_leaves_finished_jobs_alone(tmp_path: Path) -> Non
     assert all(job.error != INTERRUPTED_ERROR for job in store.list_jobs())
 
 
-def test_fail_interrupted_jobs_does_not_write_an_untouched_store(tmp_path: Path) -> None:
+def test_fail_interrupted_jobs_does_not_write_an_untouched_store(tmp_path: Path, write_jobs) -> None:
     store = JobStore(tmp_path)
     write_jobs(tmp_path, ["2026-07-01T00:00:00Z"], statuses=["completed"])
     before = (tmp_path / "jobs.json").read_text()
@@ -87,7 +69,7 @@ def test_fail_interrupted_jobs_does_not_write_an_untouched_store(tmp_path: Path)
     assert (tmp_path / "jobs.json").read_text() == before
 
 
-def test_fail_interrupted_jobs_handles_an_empty_store(tmp_path: Path) -> None:
+def test_fail_interrupted_jobs_handles_an_empty_store(tmp_path: Path, write_jobs) -> None:
     assert JobStore(tmp_path).fail_interrupted_jobs() == []
 
 
@@ -96,7 +78,7 @@ def use_store(tmp_path: Path) -> None:
     app_module.app.state.store = JobStore(tmp_path)
 
 
-def test_server_startup_reports_a_job_orphaned_by_a_restart_as_failed(tmp_path: Path) -> None:
+def test_server_startup_reports_a_job_orphaned_by_a_restart_as_failed(tmp_path: Path, write_jobs) -> None:
     """The lifespan sweep runs on server startup, so a restart heals the store."""
     write_jobs(tmp_path, ["2026-07-01T00:00:00Z"], statuses=["running"])
     use_store(tmp_path)
@@ -109,7 +91,7 @@ def test_server_startup_reports_a_job_orphaned_by_a_restart_as_failed(tmp_path: 
     assert body["error"] == INTERRUPTED_ERROR
 
 
-def test_importing_the_app_never_rewrites_a_store(tmp_path: Path) -> None:
+def test_importing_the_app_never_rewrites_a_store(tmp_path: Path, write_jobs) -> None:
     """A bare import must not touch a store another process may be working on.
 
     The sweep used to run at module scope, so any pytest run from the repository
@@ -125,7 +107,7 @@ def test_importing_the_app_never_rewrites_a_store(tmp_path: Path) -> None:
     assert (tmp_path / "jobs.json").read_text() == before
 
 
-def test_list_jobs_orders_newest_first(tmp_path: Path) -> None:
+def test_list_jobs_orders_newest_first(tmp_path: Path, write_jobs) -> None:
     store = JobStore(tmp_path)
     write_jobs(
         tmp_path,

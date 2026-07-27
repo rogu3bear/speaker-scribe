@@ -10,6 +10,11 @@ from pydantic import field_validator
 
 JobStatus = Literal["queued", "running", "completed", "failed"]
 
+# Where a job is filed. `inbox` is the working queue; `saved` is the durable
+# conversation history; `archived` is out of the way but recoverable. Filing
+# moves a job rather than copying it, so a transcript has exactly one home.
+JobCollection = Literal["inbox", "saved", "archived"]
+
 
 class TranscribeOptions(BaseModel):
     model: str = "large-v3"
@@ -44,6 +49,9 @@ class Job(BaseModel):
     filename: str
     created_at: datetime
     status: JobStatus = "queued"
+    collection: JobCollection = "inbox"
+    # User-chosen name for a saved conversation. Falls back to the file name.
+    title: str | None = None
     progress: float = Field(default=0, ge=0, le=1)
     stage: str = "Queued"
     error: str | None = None
@@ -69,6 +77,11 @@ class Job(BaseModel):
 
 class SpeakerRenameRequest(BaseModel):
     speakers: dict[str, str]
+
+
+class FileJobRequest(BaseModel):
+    collection: JobCollection
+    title: str | None = None
 
 
 class HealthResponse(BaseModel):
