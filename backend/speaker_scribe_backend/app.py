@@ -19,6 +19,7 @@ from fastapi import UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.responses import Response
+from fastapi.staticfiles import StaticFiles
 
 from . import catalog
 from .exporters import export_json
@@ -358,9 +359,26 @@ def _save_upload(file: UploadFile, destination: Path, max_upload_mb: int) -> Non
         raise HTTPException(status_code=422, detail="Audio file is empty")
 
 
+def _mount_frontend() -> None:
+    """Serve the built UI from the API when it exists.
+
+    In development vite serves the frontend and proxies /api here. A packaged
+    app has no vite, so the same server has to hand out index.html and the
+    bundle. Mounted last so it never shadows an API route, and skipped entirely
+    when `pnpm build` has not run.
+    """
+    bundle = Path(os.getenv("SPEAKER_SCRIBE_UI", Path(__file__).resolve().parents[2] / "dist"))
+    if (bundle / "index.html").exists():
+        app.mount("/", StaticFiles(directory=bundle, html=True), name="ui")
+
+
 def get_settings() -> AppSettings:
     return app.state.settings
 
 
 def get_store() -> JobStore:
     return app.state.store
+
+
+# Last, so every API route is already registered and cannot be shadowed.
+_mount_frontend()
