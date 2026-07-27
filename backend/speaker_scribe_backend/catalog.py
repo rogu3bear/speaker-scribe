@@ -137,10 +137,13 @@ def download(value: str) -> None:
     if entry is None:
         raise ValueError(f"Unknown model {value!r}")
 
-    from huggingface_hub import snapshot_download
-
     TRANSFERS.mark(value, "downloading")
     try:
+        # Imported inside the guard: on a base install this raises ImportError,
+        # and outside it the model would sit on "downloading" forever with the
+        # UI polling a state that can never change.
+        from huggingface_hub import snapshot_download
+
         snapshot_download(entry.repo)
     except Exception as exc:  # noqa: BLE001 - surfaced to the UI as model state
         TRANSFERS.mark(value, f"error: {exc}")

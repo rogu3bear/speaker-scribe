@@ -1601,6 +1601,7 @@ dependencies = [
 
 [package.optional-dependencies]
 ml = [
+    { name = "huggingface-hub", marker = "python_full_version < '3.14'" },
     { name = "mlx-whisper", marker = "python_full_version < '3.14'" },
     { name = "numba", marker = "python_full_version < '3.14'" },
     { name = "scikit-learn", marker = "python_full_version < '3.14'" },
@@ -1616,6 +1617,7 @@ test = [
 requires-dist = [
     { name = "fastapi", specifier = ">=0.124.0" },
     { name = "httpx", marker = "extra == 'test'", specifier = ">=0.28.0" },
+    { name = "huggingface-hub", marker = "python_full_version < '3.14' and extra == 'ml'", specifier = ">=0.30" },
     { name = "mlx-whisper", marker = "python_full_version < '3.14' and extra == 'ml'", specifier = ">=0.4.3" },
     { name = "numba", marker = "python_full_version < '3.14' and extra == 'ml'", specifier = ">=0.61" },
     { name = "pydantic", specifier = ">=2.12.0" },

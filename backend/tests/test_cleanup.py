@@ -37,13 +37,35 @@ def test_clean_text_keeps_a_dangling_word_that_is_not_a_false_start() -> None:
     assert clean_text("the co- operative model") == "The co- operative model"
 
 
-def test_clean_text_drops_a_leading_discourse_marker() -> None:
+def test_clean_text_drops_a_leading_discourse_marker_set_off_by_a_comma() -> None:
     assert clean_text("you know, it depends") == "It depends"
-    assert clean_text("I mean it depends") == "It depends"
+    assert clean_text("I mean, it depends") == "It depends"
+
+
+@pytest.mark.parametrize(
+    "verbatim",
+    [
+        "You know what I mean?",
+        "I mean it.",
+        "Sort of works for me.",
+        "Kind of a big deal.",
+    ],
+)
+def test_clean_text_never_removes_a_marker_that_carries_the_sentence(verbatim: str) -> None:
+    """Without a comma the phrase is the sentence. Removing it inverts meaning:
+    "Sort of works for me" is a hedge and "Works for me" is a yes."""
+    assert clean_text(verbatim) == verbatim
 
 
 def test_clean_text_keeps_the_same_phrase_when_it_carries_meaning() -> None:
     assert clean_text("do you know what I mean") == "Do you know what I mean"
+
+
+def test_clean_text_returns_empty_rather_than_stray_punctuation() -> None:
+    """An all-filler segment must not open a pooled paragraph with a bare period."""
+    assert clean_text("Uh, um.") == ""
+    assert clean_text("Hmm...") == ""
+    assert clean_text(",") == ""
 
 
 def test_clean_text_keeps_punctuation_tight() -> None:

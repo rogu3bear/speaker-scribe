@@ -143,8 +143,10 @@ def remove_model(value: str) -> list[ModelInfo]:
 def _download_model(value: str) -> None:
     try:
         catalog.download(value)
-    except Exception:  # noqa: BLE001 - state already recorded for the UI
-        pass
+    except Exception as exc:  # noqa: BLE001 - reported through model state
+        # Belt and braces: catalog.download records the failure itself, but a
+        # transfer left marked "downloading" makes the UI poll forever.
+        catalog.TRANSFERS.mark(value, f"error: {exc}")
 
 
 @app.get("/api/jobs", response_model=list[Job])

@@ -43,18 +43,20 @@ MERGE_GAP_SECONDS = 0.4
 # better than inventing a speaker for it.
 SLIVER_SECONDS = 2.0
 
-# A speaker credited with less than this in total, and a negligible share of the
-# conversation, is a leftover of clustering rather than a participant.
+# A speaker credited with fewer words than this, and a negligible share of them,
+# is a leftover of clustering rather than a participant.
 #
-# This only became safe once slivers were absorbed. Applied first it would have
-# deleted a real person: on the reference panel one "speaker" was a mixture of
-# three misattributed fragments and one genuine 20-second question, and a mass
-# floor cannot tell those apart. After the sliver pass the same recording splits
-# 1493s / 497s / 485s / 18s / 0.4s, where the smallest real voice outweighs the
-# phantom 45 to 1. Both conditions must hold, so a brief but real contributor to
-# a short recording keeps their share.
-MIN_SPEAKER_SECONDS = 5.0
-MIN_SPEAKER_SHARE = 0.01
+# Counted in transcribed words, not seconds of turn. Seconds are the wrong
+# signal: VAD is more permissive than Whisper's word timing, so clustering can
+# hand a phantom a 2.5s turn holding a single word. Judged by duration, a real
+# contributor who says "yeah, that works for me" in a long meeting looks exactly
+# like that phantom and gets folded, putting their words in someone else's mouth.
+# Judged by words it is four against one.
+#
+# The floor is deliberately low. Deleting a real speaker is far worse than
+# leaving a small phantom, so this only catches the unambiguous cases.
+MIN_SPEAKER_WORDS = 3
+MIN_SPEAKER_WORD_SHARE = 0.01
 
 DEFAULT_MAX_SPEAKERS = 8
 
@@ -180,7 +182,7 @@ def merge_turns(windows: list[tuple[float, float]], labels: list[int]) -> list[S
             turns[-1] = SpeakerTurn(previous.start, max(previous.end, end), speaker)
         else:
             turns.append(SpeakerTurn(start, end, speaker))
-    return split_overlaps(absorb_minor_speakers(absorb_slivers(turns)))
+    return split_overlaps(absorb_slivers(turns))
 
 
 def coalesce(turns: list[SpeakerTurn]) -> list[SpeakerTurn]:
@@ -252,54 +254,45 @@ def split_overlaps(turns: list[SpeakerTurn]) -> list[SpeakerTurn]:
     return turns
 
 
-def absorb_minor_speakers(turns: list[SpeakerTurn]) -> list[SpeakerTurn]:
-    """Fold away voices too small to be participants.
+def phantom_speakers(segments: list[dict[str, Any]]) -> set[str]:
+    """Speakers with too little transcribed speech to be participants."""
+    counts: dict[str, int] = defaultdict(int)
+    for segment in segments:
+        words = segment.get("words") or []
+        if words:
+            for word in words:
+                counts[str(word.get("speaker") or speaker_label(0))] += 1
+        else:
+            spoken = str(segment.get("text") or "").split()
+            counts[str(segment.get("speaker") or speaker_label(0))] += len(spoken)
 
-    A turn's length is a poor test on its own: windows are 1.5s wide, so a
-    phantom can hold a two-second turn containing a fraction of a second of
-    speech. Judging a speaker by everything they are credited with across the
-    whole recording catches that, and runs after `absorb_slivers` so the totals
-    it sees are no longer inflated by misattributed fragments.
-    """
-    totals: dict[str, float] = defaultdict(float)
-    for turn in turns:
-        totals[turn.speaker] += max(0.0, turn.end - turn.start)
-
-    overall = sum(totals.values())
-    if overall <= 0 or len(totals) < 2:
-        return turns
+    total = sum(counts.values())
+    if total <= 0 or len(counts) < 2:
+        return set()
 
     minor = {
         speaker
-        for speaker, total in totals.items()
-        if total < MIN_SPEAKER_SECONDS and total / overall < MIN_SPEAKER_SHARE
+        for speaker, count in counts.items()
+        if count < MIN_SPEAKER_WORDS and count / total < MIN_SPEAKER_WORD_SHARE
     }
-    # Never fold every voice away; something has to hold the floor.
-    if not minor or len(minor) >= len(totals):
-        return turns
+    # Never fold every voice away; someone has to hold the floor.
+    return set() if len(minor) >= len(counts) else minor
 
-    current = list(turns)
-    for index, turn in enumerate(current):
-        if turn.speaker not in minor:
+
+def _reassign_phantoms(entries: list[dict[str, Any]], minor: set[str]) -> None:
+    """Rewrite each phantom-owned entry to the nearest real speaker, in place."""
+    real = [
+        index
+        for index, entry in enumerate(entries)
+        if str(entry.get("speaker") or "") not in minor
+    ]
+    if not real:
+        return
+    for index, entry in enumerate(entries):
+        if str(entry.get("speaker") or "") not in minor:
             continue
-        host = _nearest_major_speaker(current, index, minor)
-        if host is not None:
-            current[index] = replace(turn, speaker=host)
-    return coalesce(current)
-
-
-def _nearest_major_speaker(
-    turns: list[SpeakerTurn], index: int, minor: set[str]
-) -> str | None:
-    """The closest surviving voice either side, preferring the one before."""
-    for offset in range(1, len(turns)):
-        before = index - offset
-        if before >= 0 and turns[before].speaker not in minor:
-            return turns[before].speaker
-        after = index + offset
-        if after < len(turns) and turns[after].speaker not in minor:
-            return turns[after].speaker
-    return None
+        nearest = min(real, key=lambda position: (abs(position - index), position > index))
+        entry["speaker"] = entries[nearest]["speaker"]
 
 
 def assign_speakers(result: dict[str, Any], turns: list[SpeakerTurn]) -> dict[str, Any]:
@@ -322,6 +315,18 @@ def assign_speakers(result: dict[str, Any], turns: list[SpeakerTurn]) -> dict[st
         else:
             updated["speaker"] = _best_speaker(segment_start, segment_end, turns)
         segments.append(updated)
+
+    # Only now is there enough information to spot a phantom: how much each voice
+    # actually said. Turn geometry alone cannot distinguish a stray window from
+    # someone who spoke briefly.
+    minor = phantom_speakers(segments)
+    if minor:
+        for segment in segments:
+            words = segment.get("words") or []
+            if words:
+                _reassign_phantoms(words, minor)
+                segment["speaker"] = _dominant_speaker(words)
+        _reassign_phantoms(segments, minor)
 
     return {**result, "segments": segments}
 

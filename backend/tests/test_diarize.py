@@ -3,8 +3,8 @@ import pytest
 from speaker_scribe_backend.diarize import HOP_SECONDS
 from speaker_scribe_backend.diarize import WINDOW_SECONDS
 from speaker_scribe_backend.diarize import SpeakerTurn
-from speaker_scribe_backend.diarize import absorb_minor_speakers
 from speaker_scribe_backend.diarize import absorb_slivers
+from speaker_scribe_backend.diarize import phantom_speakers
 from speaker_scribe_backend.diarize import assign_speakers
 from speaker_scribe_backend.diarize import speaker_label
 from speaker_scribe_backend.diarize import cluster_labels
@@ -193,58 +193,93 @@ def test_merge_turns_drops_a_sliver_end_to_end() -> None:
     assert {item.speaker for item in turns} == {"SPEAKER_00"}
 
 
-def test_absorb_minor_speakers_folds_a_phantom_with_a_long_but_empty_turn() -> None:
-    """A turn can clear the sliver threshold while its speaker is still a ghost.
+def spoken(speaker: str, text: str) -> dict:
+    return {"speaker": speaker, "text": text}
 
-    Windows are 1.5s wide, so clustering can hand a phantom a 2.5s turn holding a
-    fraction of a second of speech. Total credit across the recording catches it.
-    """
-    turns = [
-        turn(0, 600, 0),
-        turn(600, 602.5, 3),
-        turn(602.5, 1200, 0),
-        turn(1200, 1400, 2),
+
+def test_phantom_speakers_flags_a_voice_credited_with_one_stray_word() -> None:
+    segments = [
+        spoken("SPEAKER_00", " ".join(["word"] * 400)),
+        spoken("SPEAKER_03", "each"),
+        spoken("SPEAKER_00", " ".join(["word"] * 400)),
     ]
 
-    folded = absorb_minor_speakers(turns)
-
-    assert {item.speaker for item in folded} == {"SPEAKER_00", "SPEAKER_02"}
+    assert phantom_speakers(segments) == {"SPEAKER_03"}
 
 
-def test_absorb_minor_speakers_keeps_a_brief_but_real_contributor() -> None:
-    """The audience question this rule must not eat: one turn, twenty seconds."""
-    turns = [turn(0, 600, 0), turn(600, 620, 1), turn(620, 1200, 2)]
+def test_phantom_speakers_spares_a_brief_contributor_to_a_long_meeting() -> None:
+    """Thirty-minute standup; a third person says one short sentence.
 
-    folded = absorb_minor_speakers(turns)
+    Judged by seconds this voice looked identical to a phantom and was folded,
+    putting a real person's words in someone else's mouth.
+    """
+    segments = [
+        spoken("SPEAKER_00", " ".join(["word"] * 2000)),
+        spoken("SPEAKER_02", "Yeah, that works for me"),
+        spoken("SPEAKER_01", " ".join(["word"] * 2000)),
+    ]
 
-    assert [item.speaker for item in folded] == ["SPEAKER_00", "SPEAKER_01", "SPEAKER_02"]
-
-
-def test_absorb_minor_speakers_protects_short_recordings_by_share() -> None:
-    """Four seconds is most of a ninety-second clip, so it is not a phantom."""
-    turns = [turn(0, 40, 0), turn(40, 44, 1), turn(44, 90, 0)]
-
-    folded = absorb_minor_speakers(turns)
-
-    assert {item.speaker for item in folded} == {"SPEAKER_00", "SPEAKER_01"}
+    assert phantom_speakers(segments) == set()
 
 
-def test_absorb_minor_speakers_never_folds_every_voice() -> None:
-    turns = [turn(0, 1, 0), turn(1, 2, 1)]
+def test_phantom_speakers_spares_a_co_host_left_small_by_sliver_absorption() -> None:
+    """Backchannels get absorbed first, so only the real question remains."""
+    segments = [
+        spoken("SPEAKER_00", " ".join(["word"] * 1500)),
+        spoken("SPEAKER_02", "How did you get into this line of work"),
+        spoken("SPEAKER_01", " ".join(["word"] * 1500)),
+    ]
 
-    assert absorb_minor_speakers(turns) == turns
+    assert phantom_speakers(segments) == set()
 
 
-def test_absorb_minor_speakers_leaves_a_single_speaker_alone() -> None:
-    turns = [turn(0, 2, 0)]
+def test_phantom_speakers_never_flags_every_voice() -> None:
+    segments = [spoken("SPEAKER_00", "hi"), spoken("SPEAKER_01", "yo")]
 
-    assert absorb_minor_speakers(turns) == turns
+    assert phantom_speakers(segments) == set()
 
 
-def test_absorb_minor_speakers_is_a_no_op_when_every_voice_is_substantial() -> None:
-    turns = [turn(0, 300, 0), turn(300, 600, 1), turn(600, 900, 2)]
+def test_phantom_speakers_ignores_a_lone_speaker() -> None:
+    assert phantom_speakers([spoken("SPEAKER_00", "a")]) == set()
+    assert phantom_speakers([]) == set()
 
-    assert absorb_minor_speakers(turns) == turns
+
+def test_assign_speakers_folds_a_phantom_into_the_surrounding_voice() -> None:
+    turns = [
+        SpeakerTurn(start=0.0, end=400.0, speaker="SPEAKER_00"),
+        SpeakerTurn(start=400.0, end=402.5, speaker="SPEAKER_03"),
+        SpeakerTurn(start=402.5, end=800.0, speaker="SPEAKER_00"),
+    ]
+    result = {
+        "segments": [
+            {"start": 0.0, "end": 400.0, "text": " ".join(["word"] * 400)},
+            {"start": 400.5, "end": 400.9, "text": "each"},
+            {"start": 402.5, "end": 800.0, "text": " ".join(["word"] * 400)},
+        ]
+    }
+
+    assigned = assign_speakers(result, turns)
+
+    assert {segment["speaker"] for segment in assigned["segments"]} == {"SPEAKER_00"}
+
+
+def test_assign_speakers_keeps_a_real_brief_speaker() -> None:
+    turns = [
+        SpeakerTurn(start=0.0, end=400.0, speaker="SPEAKER_00"),
+        SpeakerTurn(start=400.0, end=404.0, speaker="SPEAKER_02"),
+        SpeakerTurn(start=404.0, end=800.0, speaker="SPEAKER_01"),
+    ]
+    result = {
+        "segments": [
+            {"start": 0.0, "end": 400.0, "text": " ".join(["word"] * 400)},
+            {"start": 400.0, "end": 404.0, "text": "Yeah, that works for me"},
+            {"start": 404.0, "end": 800.0, "text": " ".join(["word"] * 400)},
+        ]
+    }
+
+    assigned = assign_speakers(result, turns)
+
+    assert assigned["segments"][1]["speaker"] == "SPEAKER_02"
 
 
 def test_assign_speakers_maps_words_by_maximum_overlap() -> None:

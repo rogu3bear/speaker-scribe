@@ -84,8 +84,11 @@ export function voiceMetrics(job: Job): Map<string, VoiceMetrics> {
       0,
     );
     const words = mine.reduce((sum, segment) => sum + segmentWords(segment), 0);
+    // Nullish, not falsy: an empty clean_text means cleanup removed every word,
+    // which is the most filler-dense segment there is. Falling back to verbatim
+    // there would score it as containing no filler at all.
     const cleanWords = mine.reduce(
-      (sum, segment) => sum + countWords(segment.clean_text || segment.text),
+      (sum, segment) => sum + countWords(segment.clean_text ?? segment.text),
       0,
     );
     const turnSeconds = myTurns.map((turn) => Math.max(0, turn.end - turn.start));

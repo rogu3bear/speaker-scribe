@@ -24,6 +24,9 @@ ml = [
   "silero-vad>=5.1; python_version < '3.14'",
   "speechbrain>=1.0.2; python_version < '3.14'",
   "scikit-learn>=1.5; python_version < '3.14'",
+  # Used directly by catalog.py to read and manage the model cache. It arrives
+  # transitively too, but relying on that leaves the dependency undeclared.
+  "huggingface-hub>=0.30; python_version < '3.14'",
 ]
 test = [
   "httpx>=0.28.0",

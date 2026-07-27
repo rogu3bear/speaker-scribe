@@ -1,5 +1,7 @@
+import sys
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 
 from speaker_scribe_backend import app as app_module
@@ -69,6 +71,7 @@ def test_models_surface_a_failed_download(monkeypatch, tmp_path: Path) -> None:
 
 def test_an_unreadable_cache_degrades_to_missing(monkeypatch, tmp_path: Path) -> None:
     """A broken cache must not take the whole API down."""
+    pytest.importorskip("huggingface_hub")
 
     def explode() -> dict[str, int]:
         raise OSError("cache is on fire")
@@ -76,6 +79,28 @@ def test_an_unreadable_cache_degrades_to_missing(monkeypatch, tmp_path: Path) ->
     monkeypatch.setattr("huggingface_hub.scan_cache_dir", explode)
 
     assert catalog.cached_sizes() == {}
+
+
+def test_cached_sizes_is_empty_without_the_speech_stack(monkeypatch) -> None:
+    """The base install has no huggingface_hub; the catalog still has to answer."""
+    monkeypatch.setitem(sys.modules, "huggingface_hub", None)
+
+    assert catalog.cached_sizes() == {}
+
+
+def test_a_download_that_cannot_start_reports_an_error_not_a_stuck_spinner(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """A transfer left on "downloading" makes the UI poll a state that never changes."""
+    monkeypatch.setattr(catalog, "cached_sizes", lambda: {})
+    monkeypatch.setitem(sys.modules, "huggingface_hub", None)
+
+    try:
+        with pytest.raises(Exception):
+            catalog.download("base")
+        assert catalog.TRANSFERS.snapshot()["base"].startswith("error:")
+    finally:
+        catalog.TRANSFERS.clear("base")
 
 
 def test_downloading_an_unknown_model_is_a_404(tmp_path: Path) -> None:

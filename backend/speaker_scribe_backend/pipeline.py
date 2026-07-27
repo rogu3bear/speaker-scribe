@@ -4,6 +4,7 @@ import importlib.util
 import os
 import shutil
 import sys
+import threading
 import time
 from collections.abc import Callable
 from collections.abc import Iterator
@@ -78,26 +79,25 @@ def resolve_model(model: str) -> str:
     return MLX_MODEL_ALIASES.get(model, model)
 
 
+# Which job's progress the running thread is reporting. Jobs run one per thread,
+# so the sink has to be thread-local: a shared one would cross wires between two
+# uploads processing at the same time.
+_SINK = threading.local()
+
+
 class FrameProgressBar:
     """Stands in for mlx-whisper's internal tqdm bar and forwards its updates.
 
     mlx-whisper exposes no progress callback, but it drives a tqdm bar over audio
-    frames and looks it up as a module attribute at call time. Swapping that
-    attribute is the only way to see inside the single long call that dominates a
-    job, which otherwise leaves the UI frozen at one number for minutes.
+    frames and looks it up as a module attribute at call time. Standing in for
+    that attribute is the only way to see inside the single long call that
+    dominates a job, which otherwise leaves the UI frozen for minutes.
     """
 
-    def __init__(self, report: ProgressCallback, start: float, end: float) -> None:
-        self._report = report
-        self._start = start
-        self._end = end
-        self._total = 0
+    def __init__(self, sink: tuple[ProgressCallback, float, float] | None, total: int) -> None:
+        self._sink = sink
+        self._total = total
         self._done = 0
-
-    def __call__(self, *_args: Any, total: int | None = None, **_kwargs: Any) -> "FrameProgressBar":
-        self._total = total or 0
-        self._done = 0
-        return self
 
     def __enter__(self) -> "FrameProgressBar":
         return self
@@ -107,13 +107,46 @@ class FrameProgressBar:
 
     def update(self, amount: int = 1) -> None:
         self._done += amount
-        if self._total <= 0:
+        if self._sink is None or self._total <= 0:
             return
+        report, start, end = self._sink
         fraction = min(1.0, max(0.0, self._done / self._total))
-        self._report(self._start + (self._end - self._start) * fraction, TRANSCRIBING_STAGE)
+        report(start + (end - start) * fraction, TRANSCRIBING_STAGE)
 
     def close(self) -> None:
         return None
+
+
+def _new_frame_bar(*_args: Any, total: int | None = None, **_kwargs: Any) -> FrameProgressBar:
+    """Build a bar bound to the calling thread's job. One per transcription."""
+    return FrameProgressBar(getattr(_SINK, "target", None), total or 0)
+
+
+def _install_frame_bar() -> bool:
+    """Put the stand-in in place once. Never restored, so it cannot be inverted.
+
+    Save-and-restore around each call looked natural and was wrong: with two jobs
+    in flight the second captures the first's stand-in as the "original" and puts
+    it back on exit, leaving the module permanently pointed at a finished job's
+    callback. Installing once and routing through a thread-local removes the
+    restore step that made that possible.
+    """
+    try:
+        import mlx_whisper  # noqa: F401
+    except ImportError:
+        return False
+
+    # Must come from sys.modules: mlx_whisper/__init__.py rebinds the name
+    # `transcribe` to the function, so `mlx_whisper.transcribe` is not the module.
+    module = sys.modules.get("mlx_whisper.transcribe")
+    existing = getattr(module, "tqdm", None) if module is not None else None
+    if existing is None:
+        return False
+    if getattr(existing, "speaker_scribe_bar", False):
+        return True
+
+    module.tqdm = SimpleNamespace(tqdm=_new_frame_bar, speaker_scribe_bar=True)
+    return True
 
 
 @contextmanager
@@ -123,29 +156,16 @@ def frame_progress(report: ProgressCallback, start: float, end: float) -> Iterat
     Degrades to no progress updates rather than failing the job if the internals
     ever move; transcription itself is unaffected either way.
     """
-    try:
-        import mlx_whisper  # noqa: F401
-    except ImportError:
+    if not _install_frame_bar():
         yield
         return
 
-    # Must come from sys.modules: mlx_whisper/__init__.py rebinds the name
-    # `transcribe` to the function, so `mlx_whisper.transcribe` is not the module.
-    transcribe_module = sys.modules.get("mlx_whisper.transcribe")
-    if transcribe_module is None:
-        yield
-        return
-
-    original = getattr(transcribe_module, "tqdm", None)
-    if original is None:
-        yield
-        return
-
-    transcribe_module.tqdm = SimpleNamespace(tqdm=FrameProgressBar(report, start, end))
+    previous = getattr(_SINK, "target", None)
+    _SINK.target = (report, start, end)
     try:
         yield
     finally:
-        transcribe_module.tqdm = original
+        _SINK.target = previous
 
 
 class MlxWhisperTranscriber:

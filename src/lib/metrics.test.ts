@@ -114,6 +114,20 @@ describe("voiceMetrics", () => {
     expect(instant.shareOfTalk).toBe(0);
   });
 
+  it("counts a wholly-filler segment as all filler", () => {
+    // clean_text "" means cleanup removed every word. Treating that as falsy and
+    // falling back to verbatim scored the most filler-dense segment as clean.
+    const hesitant = voiceMetrics(
+      job([
+        segment("1", "A", 0, 4, "real words here", "real words here"),
+        segment("2", "A", 4, 6, "um uh hmm", ""),
+      ]),
+    ).get("A")!;
+
+    expect(hesitant.words).toBe(6);
+    expect(hesitant.fillerWords).toBe(3);
+  });
+
   it("falls back to verbatim when a transcript predates cleanup", () => {
     const legacy = voiceMetrics(job([segment("1", "A", 0, 10, "um so it goes")])).get("A")!;
 

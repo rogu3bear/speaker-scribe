@@ -39,9 +39,16 @@ FILLER_WORDS = frozenset(
     }
 )
 
-# Discourse markers that add nothing when they open a clause. Removed only in
-# that position, because "you know what I mean" and "like a coding perspective"
-# are load-bearing.
+# Discourse markers that add nothing when a speaker opens with them. Dropped
+# only when the speaker set the phrase off with a comma, which is the difference
+# between an aside and the actual sentence:
+#
+#   "You know, it depends."   -> "It depends."
+#   "You know what I mean?"   -> unchanged; removal would leave "What I mean?"
+#   "Sort of works for me."   -> unchanged; removal would turn a hedge into a yes
+#
+# The comma is what makes this safe. Matching on the words alone inverted
+# meaning, which is worse in a transcript than leaving a filler in place.
 LEADING_FILLER_PHRASES = (
     "you know",
     "i mean",
@@ -80,7 +87,9 @@ def clean_text(text: str, *, starts_sentence: bool = True) -> str:
     kept = _collapse_repeats(kept)
     kept = _drop_leading_phrases(kept)
     kept = _tidy_punctuation(kept)
-    if not kept:
+    # Nothing but punctuation left means the segment was entirely filler. Return
+    # empty rather than a stray "." that would open a pooled paragraph.
+    if not any(_is_word(token) for token in kept):
         return ""
 
     rendered = _render(kept)
@@ -156,12 +165,14 @@ def _drop_leading_phrases(tokens: list[str]) -> list[str]:
     lowered = [_normal(token) for token in tokens]
     for phrase in LEADING_FILLER_PHRASES:
         words = phrase.split()
-        if lowered[: len(words)] == words:
-            trimmed = tokens[len(words) :]
-            # Drop the comma the phrase was leaning on, not the next real word.
-            if trimmed and trimmed[0] == ",":
-                trimmed = trimmed[1:]
-            return trimmed
+        if lowered[: len(words)] != words:
+            continue
+        trimmed = tokens[len(words) :]
+        # Only an aside, marked as one by the speaker. Without the comma the
+        # phrase is part of the sentence and removing it changes what was said.
+        if trimmed and trimmed[0] == ",":
+            return trimmed[1:]
+        return tokens
     return tokens
 
 
