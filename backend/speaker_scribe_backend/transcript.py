@@ -4,8 +4,22 @@ from collections import defaultdict
 from collections.abc import Iterable
 from typing import Any
 
+from .cleanup import clean_text
 from .models import Speaker
 from .models import TranscriptSegment
+
+
+def build_segment(
+    segment_id: str, start: float, end: float, text: str, speaker: str
+) -> TranscriptSegment:
+    return TranscriptSegment(
+        id=segment_id,
+        start=round(start, 2),
+        end=round(end, 2),
+        text=text,
+        clean_text=clean_text(text),
+        speaker=speaker,
+    )
 
 SPEAKER_COLORS = [
     "#0f766e",
@@ -57,13 +71,7 @@ def normalize_transcription_result(result: dict[str, Any]) -> tuple[list[Transcr
         speaker = str(segment.get("speaker") or "SPEAKER_00")
         if text:
             normalized.append(
-                TranscriptSegment(
-                    id=f"seg-{segment_index + 1}",
-                    start=round(start, 2),
-                    end=round(end, 2),
-                    text=text,
-                    speaker=speaker,
-                )
+                build_segment(f"seg-{segment_index + 1}", start, end, text, speaker)
             )
 
     duration = None
@@ -86,12 +94,12 @@ def _segments_from_words(segment_index: int, words: list[dict[str, Any]]) -> lis
             return
         group_index += 1
         grouped.append(
-            TranscriptSegment(
-                id=f"seg-{segment_index + 1}-{group_index}",
-                start=round(current_start, 2),
-                end=round(current_end, 2),
-                text=_join_words(current_words),
-                speaker=current_speaker,
+            build_segment(
+                f"seg-{segment_index + 1}-{group_index}",
+                current_start,
+                current_end,
+                _join_words(current_words),
+                current_speaker,
             )
         )
 

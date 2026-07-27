@@ -52,9 +52,15 @@ EMBEDDING_MODEL = "speechbrain/spkrec-ecapa-voxceleb"
 # ECAPA runs one window at a time: measured at ~14 ms/window on CPU, and padding
 # windows into batches was three times slower. Progress is reported every so many
 # windows, spanning this range of the job's progress bar.
+#
+# Diarization owns the tail of the bar, picking up where transcription stops at
+# pipeline.TRANSCRIBE_PROGRESS_END_WITH_DIARIZATION. These stay in step with it.
 EMBEDDING_PROGRESS_EVERY = 64
-EMBEDDING_PROGRESS_START = 0.62
-EMBEDDING_PROGRESS_END = 0.80
+DECODE_PROGRESS = 0.80
+VAD_PROGRESS = 0.82
+EMBEDDING_PROGRESS_START = 0.84
+EMBEDDING_PROGRESS_END = 0.94
+CLUSTERING_PROGRESS = 0.95
 
 
 @dataclass(frozen=True)
@@ -246,18 +252,19 @@ class LocalDiarizer:
         options: TranscribeOptions,
         progress: Any,
     ) -> list[SpeakerTurn]:
+        progress(DECODE_PROGRESS, "Decoding audio for speaker analysis")
         waveform = load_audio_16k(audio_path)
 
-        progress(0.55, "Detecting speech regions with Silero VAD")
+        progress(VAD_PROGRESS, "Detecting speech regions with Silero VAD")
         regions = self._speech_regions(waveform)
         windows = speech_windows(regions)
         if not windows:
             return []
 
-        progress(0.62, f"Embedding {len(windows)} speech windows")
+        progress(EMBEDDING_PROGRESS_START, f"Embedding {len(windows)} speech windows")
         embeddings = self._embeddings(waveform, windows, progress)
 
-        progress(0.82, "Clustering speaker embeddings")
+        progress(CLUSTERING_PROGRESS, "Clustering speaker embeddings")
         labels = relabel_by_first_appearance(
             cluster_labels(embeddings, options.min_speakers, options.max_speakers)
         )
