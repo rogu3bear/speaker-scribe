@@ -1,5 +1,5 @@
 from speaker_scribe_backend.transcript import build_speakers
-from speaker_scribe_backend.transcript import normalize_whispermlx_result
+from speaker_scribe_backend.transcript import normalize_transcription_result
 
 
 def test_normalize_words_splits_on_speaker_change() -> None:
@@ -15,7 +15,7 @@ def test_normalize_words_splits_on_speaker_change() -> None:
         ]
     }
 
-    segments, duration = normalize_whispermlx_result(result)
+    segments, duration = normalize_transcription_result(result)
 
     assert duration == 1.0
     assert [segment.speaker for segment in segments] == ["SPEAKER_00", "SPEAKER_01"]
@@ -23,7 +23,7 @@ def test_normalize_words_splits_on_speaker_change() -> None:
 
 
 def test_build_speakers_accumulates_talk_time() -> None:
-    segments, _ = normalize_whispermlx_result(
+    segments, _ = normalize_transcription_result(
         {
             "segments": [
                 {"start": 0, "end": 2, "text": "One", "speaker": "SPEAKER_00"},

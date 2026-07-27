@@ -14,7 +14,16 @@ dependencies = [
 
 [project.optional-dependencies]
 ml = [
-  "whispermlx==3.12.2; python_version < '3.14'",
+  # MLX Whisper transcription plus a fully local, account-free diarization stack:
+  # Silero VAD for speech regions, SpeechBrain ECAPA embeddings, scikit-learn clustering.
+  "mlx-whisper>=0.4.3; python_version < '3.14'",
+  # mlx-whisper leaves numba unpinned. Without a floor the resolver keeps the newest
+  # numpy and backtracks numba to 0.53.1, whose llvmlite refuses to build on Python
+  # >=3.10. Pinning numba forces numpy down to a version numba actually supports.
+  "numba>=0.61; python_version < '3.14'",
+  "silero-vad>=5.1; python_version < '3.14'",
+  "speechbrain>=1.0.2; python_version < '3.14'",
+  "scikit-learn>=1.5; python_version < '3.14'",
 ]
 test = [
   "httpx>=0.28.0",

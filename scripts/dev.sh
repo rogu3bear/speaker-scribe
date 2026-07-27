@@ -9,7 +9,13 @@ cleanup() {
 }
 trap cleanup EXIT
 
-uv run uvicorn speaker_scribe_backend.app:app \
+# Naming the extra here makes the dev command self-sufficient: a checkout that has
+# only ever run `uv sync --extra test` still gets the real engine installed before
+# uvicorn starts, instead of failing on the first upload.
+# Use SPEAKER_SCRIBE_EXTRA=test with SPEAKER_SCRIBE_ENGINE=mock for the light lane.
+EXTRA="${SPEAKER_SCRIBE_EXTRA:-ml}"
+
+uv run --extra "$EXTRA" uvicorn speaker_scribe_backend.app:app \
   --app-dir backend \
   --host 127.0.0.1 \
   --port 8118 \
