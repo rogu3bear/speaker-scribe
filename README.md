@@ -41,7 +41,7 @@ brew install ffmpeg
 uv sync --extra ml
 ```
 
-Weights land in `~/.cache/speaker-scribe` and the Hugging Face cache on first run; override with `SPEAKER_SCRIBE_MODEL_CACHE`.
+On first run the speaker-embedding model is cached in `~/.cache/speaker-scribe`, which `SPEAKER_SCRIBE_MODEL_CACHE` overrides. Whisper weights are fetched separately into the standard Hugging Face cache, which `HF_HOME` controls.
 
 For a deterministic smoke-test engine that does not download models:
 
@@ -77,7 +77,17 @@ Or run both with:
 ./scripts/check.sh
 ```
 
-This runs frontend type/build/test checks plus backend unit tests.
+This runs frontend type/build/test checks plus backend unit tests against the real
+speech stack. Use `SPEAKER_SCRIBE_EXTRA=test ./scripts/check.sh` on a machine that
+cannot install it; the ML-gated tests skip rather than fail.
+
+To prove the base install still works on its own, run the suite in an environment with
+the `ml` extra removed:
+
+```bash
+uv run --exact --extra test pytest backend/tests -q
+uv sync --extra ml --extra test   # restore afterwards
+```
 
 ## Open Source
 
