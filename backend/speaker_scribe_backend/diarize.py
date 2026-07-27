@@ -17,6 +17,7 @@ import shutil
 import subprocess
 from collections import defaultdict
 from dataclasses import dataclass
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -126,7 +127,9 @@ def speech_windows(regions: list[tuple[float, float]]) -> list[tuple[float, floa
         while cursor + WINDOW_SECONDS <= end:
             windows.append((cursor, cursor + WINDOW_SECONDS))
             cursor += HOP_SECONDS
-        if end - cursor >= MIN_WINDOW_SECONDS:
+        # Only keep a tail that reaches past the last full window. Otherwise it is
+        # wholly contained in it and would double-count the end of the region.
+        if end - cursor >= MIN_WINDOW_SECONDS and end > windows[-1][1]:
             windows.append((cursor, end))
     return windows
 
@@ -150,6 +153,24 @@ def merge_turns(windows: list[tuple[float, float]], labels: list[int]) -> list[S
             turns[-1] = SpeakerTurn(previous.start, max(previous.end, end), speaker)
         else:
             turns.append(SpeakerTurn(start, end, speaker))
+    return split_overlaps(turns)
+
+
+def split_overlaps(turns: list[SpeakerTurn]) -> list[SpeakerTurn]:
+    """Give overlapping neighbours a shared boundary at the midpoint.
+
+    Embedding windows overlap by `HOP_SECONDS`, so a speaker change emits two
+    turns that overlap by that much. Left alone, `_best_speaker` awards the whole
+    overlap to the outgoing speaker, putting every change up to a hop late. The
+    real change point is somewhere inside the overlap, and its midpoint is the
+    unbiased estimate.
+    """
+    for index in range(len(turns) - 1):
+        current, following = turns[index], turns[index + 1]
+        if following.start < current.end:
+            boundary = (following.start + current.end) / 2
+            turns[index] = replace(current, end=boundary)
+            turns[index + 1] = replace(following, start=boundary)
     return turns
 
 
@@ -189,7 +210,9 @@ def cluster_labels(
 
     from sklearn.metrics import silhouette_score
 
-    low = max(1, min_speakers or 1)
+    # Both bounds clamp to the window count: asking for more speakers than there
+    # are windows to cluster is a user-reachable input, not a programming error.
+    low = max(1, min(min_speakers or 1, count))
     high = max(low, min(max_speakers or DEFAULT_MAX_SPEAKERS, count))
     if low == high:
         return _fit_clusters(embeddings, low)

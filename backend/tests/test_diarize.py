@@ -33,6 +33,22 @@ def test_speech_windows_keeps_a_short_region_whole() -> None:
     assert speech_windows([(1.0, 2.0)]) == [(1.0, 2.0)]
 
 
+def test_speech_windows_drops_a_tail_already_covered_by_the_last_window() -> None:
+    """A tail wholly inside the previous window would double-count that audio."""
+    windows = speech_windows([(0.0, 3.0)])
+
+    assert windows == [(0.0, 1.5), (0.75, 2.25), (1.5, 3.0)]
+    assert not any(
+        earlier[0] <= later[0] and later[1] <= earlier[1]
+        for index, earlier in enumerate(windows)
+        for later in windows[index + 1 :]
+    )
+
+
+def test_speech_windows_keeps_a_tail_that_extends_past_the_last_window() -> None:
+    assert speech_windows([(0.0, 3.4)])[-1] == (2.25, 3.4)
+
+
 def test_relabel_by_first_appearance_renumbers_from_zero() -> None:
     assert relabel_by_first_appearance([3, 3, 1, 1, 3, 7]) == [0, 0, 1, 1, 0, 2]
 
@@ -52,6 +68,53 @@ def test_merge_turns_splits_when_the_speaker_changes_back() -> None:
     turns = merge_turns([(0.0, 1.5), (1.5, 3.0), (3.0, 4.5)], [0, 1, 0])
 
     assert [turn.speaker for turn in turns] == ["SPEAKER_00", "SPEAKER_01", "SPEAKER_00"]
+
+
+def test_merge_turns_splits_an_overlap_at_its_midpoint() -> None:
+    """Windows overlap by a hop, so a speaker change emits overlapping turns."""
+    windows = [(0.0, 1.5), (0.75, 2.25), (1.5, 3.0), (2.25, 3.75)]
+
+    turns = merge_turns(windows, [0, 0, 0, 1])
+
+    assert turns == [
+        SpeakerTurn(start=0.0, end=2.625, speaker="SPEAKER_00"),
+        SpeakerTurn(start=2.625, end=3.75, speaker="SPEAKER_01"),
+    ]
+
+
+def test_merge_turns_never_returns_overlapping_turns() -> None:
+    turns = merge_turns(
+        [(0.0, 1.5), (0.75, 2.25), (1.5, 3.0), (2.25, 3.75), (3.0, 4.5)],
+        [0, 0, 1, 1, 0],
+    )
+
+    assert all(a.end <= b.start for a, b in zip(turns, turns[1:]))
+
+
+def test_assign_speakers_does_not_lag_a_speaker_change(  # noqa: D401
+) -> None:
+    """Words after the boundary belong to the incoming speaker, not the outgoing one.
+
+    Before overlaps were split, the outgoing turn won the whole overlap region and
+    every change landed up to a hop late.
+    """
+    turns = merge_turns([(0.0, 1.5), (0.75, 2.25), (1.5, 3.0), (2.25, 3.75)], [0, 0, 0, 1])
+    result = {
+        "segments": [
+            {
+                "start": 2.0,
+                "end": 3.0,
+                "words": [
+                    {"word": "before", "start": 2.3, "end": 2.5},
+                    {"word": "after", "start": 2.7, "end": 2.9},
+                ],
+            }
+        ]
+    }
+
+    words = assign_speakers(result, turns)["segments"][0]["words"]
+
+    assert [word["speaker"] for word in words] == ["SPEAKER_00", "SPEAKER_01"]
 
 
 def test_assign_speakers_maps_words_by_maximum_overlap() -> None:
@@ -186,3 +249,17 @@ def test_cluster_labels_reports_one_speaker_for_a_uniform_recording() -> None:
 
 def test_cluster_labels_returns_nothing_for_no_embeddings() -> None:
     assert cluster_labels([]) == []
+
+
+def test_cluster_labels_clamps_a_speaker_floor_above_the_window_count() -> None:
+    """min_speakers is user input, so it can exceed the windows available.
+
+    Short audio yields very few embedding windows; asking for more speakers than
+    that used to reach AgglomerativeClustering with n_clusters > n_samples and
+    raise ValueError after transcription had already completed.
+    """
+    pytest.importorskip("sklearn")
+
+    assert cluster_labels([[1.0, 0.0, 0.0]], min_speakers=4) == [0]
+    assert cluster_labels([[1.0, 0.0, 0.0]], min_speakers=12, max_speakers=12) == [0]
+    assert len(set(cluster_labels(two_voice_embeddings(), min_speakers=12))) <= 10
