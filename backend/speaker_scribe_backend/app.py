@@ -3,6 +3,8 @@ from __future__ import annotations
 import os
 import re
 import threading
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import UTC
 from datetime import datetime
@@ -43,7 +45,17 @@ class AppSettings:
         )
 
 
-app = FastAPI(title="Speaker Scribe API", version="0.1.0")
+@asynccontextmanager
+async def lifespan(api: FastAPI) -> AsyncIterator[None]:
+    # Worker threads do not survive a restart, so anything still in flight is dead.
+    # This runs on server startup rather than at import, so that merely importing
+    # this module — as any pytest run from the repository root does — cannot
+    # rewrite a store that another process is actively working on.
+    api.state.store.fail_interrupted_jobs()
+    yield
+
+
+app = FastAPI(title="Speaker Scribe API", version="0.1.0", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://127.0.0.1:5178", "http://localhost:5178"],
@@ -54,8 +66,6 @@ app.add_middleware(
 
 app.state.settings = AppSettings.from_env()
 app.state.store = JobStore(app.state.settings.data_root)
-# Worker threads do not survive a restart, so anything still in flight is dead.
-app.state.store.fail_interrupted_jobs()
 
 
 @app.get("/api/health", response_model=HealthResponse)

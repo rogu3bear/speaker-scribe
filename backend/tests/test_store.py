@@ -1,10 +1,10 @@
-import importlib
 import json
 from pathlib import Path
 
 from fastapi.testclient import TestClient
 
 from speaker_scribe_backend import app as app_module
+from speaker_scribe_backend.app import AppSettings
 from speaker_scribe_backend.store import INTERRUPTED_ERROR
 from speaker_scribe_backend.store import JobStore
 
@@ -91,20 +91,38 @@ def test_fail_interrupted_jobs_handles_an_empty_store(tmp_path: Path) -> None:
     assert JobStore(tmp_path).fail_interrupted_jobs() == []
 
 
-def test_startup_reports_a_job_orphaned_by_a_restart_as_failed(monkeypatch, tmp_path: Path) -> None:
-    """app.py sweeps when the store is built, so a restart heals the store itself."""
+def use_store(tmp_path: Path) -> None:
+    app_module.app.state.settings = AppSettings(data_root=tmp_path, max_upload_mb=1)
+    app_module.app.state.store = JobStore(tmp_path)
+
+
+def test_server_startup_reports_a_job_orphaned_by_a_restart_as_failed(tmp_path: Path) -> None:
+    """The lifespan sweep runs on server startup, so a restart heals the store."""
     write_jobs(tmp_path, ["2026-07-01T00:00:00Z"], statuses=["running"])
-    monkeypatch.setenv("SPEAKER_SCRIBE_DATA", str(tmp_path))
+    use_store(tmp_path)
 
-    try:
-        reloaded = importlib.reload(app_module)
-        body = TestClient(reloaded.app).get("/api/jobs/job-0").json()
+    # Entering the client context is what runs the lifespan handler.
+    with TestClient(app_module.app) as client:
+        body = client.get("/api/jobs/job-0").json()
 
-        assert body["status"] == "failed"
-        assert body["error"] == INTERRUPTED_ERROR
-    finally:
-        monkeypatch.undo()
-        importlib.reload(app_module)
+    assert body["status"] == "failed"
+    assert body["error"] == INTERRUPTED_ERROR
+
+
+def test_importing_the_app_never_rewrites_a_store(tmp_path: Path) -> None:
+    """A bare import must not touch a store another process may be working on.
+
+    The sweep used to run at module scope, so any pytest run from the repository
+    root rewrote the developer's live jobs.json — and could mark a genuinely
+    running job as interrupted underneath the process still working on it.
+    """
+    write_jobs(tmp_path, ["2026-07-01T00:00:00Z"], statuses=["running"])
+    before = (tmp_path / "jobs.json").read_text()
+    use_store(tmp_path)
+
+    TestClient(app_module.app)  # constructed, never entered: no lifespan, no sweep
+
+    assert (tmp_path / "jobs.json").read_text() == before
 
 
 def test_list_jobs_orders_newest_first(tmp_path: Path) -> None:
