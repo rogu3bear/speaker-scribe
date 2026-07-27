@@ -1,14 +1,14 @@
 import { AlertTriangle, Mic2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { ChangeEvent, FormEvent } from "react";
-import { fetchJob, fetchJobs, renameSpeakers, uploadAudio } from "./api";
+import { fetchHealth, fetchJob, fetchJobs, renameSpeakers, uploadAudio } from "./api";
 import { JobList } from "./components/JobList";
 import { SpeakerPanel } from "./components/SpeakerPanel";
 import { TranscriptWorkspace } from "./components/TranscriptWorkspace";
 import { UploadPanel } from "./components/UploadPanel";
 import { DEFAULT_TRANSCRIBE_OPTIONS } from "./constants";
 import { canPollJob } from "./lib/presentation";
-import type { Job, Speaker, TranscribeOptions } from "./types";
+import type { Health, Job, Speaker, TranscribeOptions } from "./types";
 
 function App() {
   const [jobs, setJobs] = useState<Job[]>([]);
@@ -17,6 +17,7 @@ function App() {
   const [options, setOptions] = useState<TranscribeOptions>(DEFAULT_TRANSCRIBE_OPTIONS);
   const [uploading, setUploading] = useState(false);
   const [apiNotice, setApiNotice] = useState<string | null>(null);
+  const [health, setHealth] = useState<Health | null>(null);
 
   const activeJob = jobs.find((job) => job.id === activeJobId) ?? null;
 
@@ -43,6 +44,12 @@ function App() {
       void refreshJobs();
     }, 4000);
     return () => window.clearInterval(handle);
+  }, []);
+
+  useEffect(() => {
+    fetchHealth()
+      .then(setHealth)
+      .catch(() => setHealth(null));
   }, []);
 
   useEffect(() => {
@@ -123,6 +130,17 @@ function App() {
             <p>Local MLX transcripts with speaker turns.</p>
           </div>
         </div>
+
+        {health && !health.ml_ready ? (
+          <div className="notice" role="alert">
+            <AlertTriangle size={16} />
+            <span>
+              <strong>Real transcription is unavailable.</strong>{" "}
+              {health.detail ?? "The local speech engine is not ready."} Uploads will fail
+              until this is resolved.
+            </span>
+          </div>
+        ) : null}
 
         <UploadPanel
           selectedFile={selectedFile}

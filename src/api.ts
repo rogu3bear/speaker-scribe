@@ -1,4 +1,4 @@
-import type { Job, SpeakerRenameRequest, TranscribeOptions } from "./types";
+import type { Health, Job, SpeakerRenameRequest, TranscribeOptions } from "./types";
 
 const API_BASE = import.meta.env.VITE_API_BASE ?? "";
 
@@ -16,6 +16,11 @@ async function parseJson<T>(response: Response): Promise<T> {
     throw new Error(message);
   }
   return (await response.json()) as T;
+}
+
+export async function fetchHealth(): Promise<Health> {
+  const response = await fetch(`${API_BASE}/api/health`);
+  return parseJson<Health>(response);
 }
 
 export async function fetchJobs(): Promise<Job[]> {

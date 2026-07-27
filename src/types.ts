@@ -44,3 +44,10 @@ export type Job = {
 export type SpeakerRenameRequest = {
   speakers: Record<string, string>;
 };
+
+export type Health = {
+  ok: boolean;
+  engine: string;
+  ml_ready: boolean;
+  detail?: string | null;
+};
