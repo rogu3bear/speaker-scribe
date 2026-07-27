@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+from datetime import UTC
 from datetime import datetime
 from typing import Literal
 
 from pydantic import BaseModel
 from pydantic import Field
+from pydantic import field_validator
 
 JobStatus = Literal["queued", "running", "completed", "failed"]
 
@@ -48,6 +50,17 @@ class Job(BaseModel):
     audio_url: str | None = None
     speakers: list[Speaker] = Field(default_factory=list)
     segments: list[TranscriptSegment] = Field(default_factory=list)
+
+    @field_validator("created_at")
+    @classmethod
+    def _ensure_aware(cls, value: datetime) -> datetime:
+        """Treat stored naive timestamps as UTC.
+
+        Jobs written before the switch to `datetime.now(UTC)` are naive, and
+        sorting a store that holds both kinds raises TypeError. Normalizing on
+        read keeps old and new rows comparable without rewriting the file.
+        """
+        return value if value.tzinfo is not None else value.replace(tzinfo=UTC)
 
 
 class SpeakerRenameRequest(BaseModel):
