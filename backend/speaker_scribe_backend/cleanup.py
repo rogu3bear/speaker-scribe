@@ -186,6 +186,20 @@ def _within_number(tokens: list[str], index: int) -> bool:
     )
 
 
+def _joins_hyphen(tokens: list[str], index: int) -> bool:
+    """Whether a lone hyphen binds the words either side of it.
+
+    Whisper often writes a compound as "non -technical", which tokenizes to three
+    pieces. Rendering them with the default spacing gave "non - technical", worse
+    than the input. Binding both sides recovers "non-technical". A token that
+    already carries a trailing hyphen, as a false start does, is left alone.
+    """
+    previous = tokens[index - 1]
+    if tokens[index] == "-":
+        return _is_word(previous)
+    return previous == "-" and index >= 2 and _is_word(tokens[index - 2])
+
+
 def _render(tokens: list[str]) -> str:
     parts: list[str] = []
     for index, token in enumerate(tokens):
@@ -197,6 +211,7 @@ def _render(tokens: list[str]) -> str:
             or token.startswith("'")
             or tokens[index - 1] in ATTACHES_RIGHT
             or _within_number(tokens, index)
+            or _joins_hyphen(tokens, index)
         )
         parts.append(token if joins else " " + token)
     return "".join(parts).strip()

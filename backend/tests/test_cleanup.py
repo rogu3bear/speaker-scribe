@@ -61,6 +61,25 @@ def test_clean_text_keeps_the_same_phrase_when_it_carries_meaning() -> None:
     assert clean_text("do you know what I mean") == "Do you know what I mean"
 
 
+@pytest.mark.parametrize(
+    ("verbatim", "expected"),
+    [
+        ("the non -technical people", "The non-technical people"),
+        ("we are energy -saving", "We are energy-saving"),
+        ("they double -click on it", "They double-click on it"),
+        ("a well-known case", "A well-known case"),
+    ],
+)
+def test_clean_text_rejoins_a_split_compound(verbatim: str, expected: str) -> None:
+    """Whisper writes compounds as "non -technical"; spacing that gave "non - technical"."""
+    assert clean_text(verbatim) == expected
+
+
+def test_clean_text_leaves_a_false_start_hyphen_alone() -> None:
+    """"co-" is a dangling word, not half of a compound."""
+    assert clean_text("co- operative model") == "Co- operative model"
+
+
 def test_clean_text_returns_empty_rather_than_stray_punctuation() -> None:
     """An all-filler segment must not open a pooled paragraph with a bare period."""
     assert clean_text("Uh, um.") == ""
