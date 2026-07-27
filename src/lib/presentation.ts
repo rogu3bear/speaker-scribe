@@ -56,6 +56,20 @@ export function canPollJob(job: Job | null): job is Job {
   return job?.status === "queued" || job?.status === "running";
 }
 
+/**
+ * Render a turn as one flowing paragraph.
+ *
+ * Whisper's segments are sentence fragments; shown as separate lines they read
+ * as a list rather than as someone talking. Falls back to verbatim per segment,
+ * so a transcript made before cleanup existed still reads correctly.
+ */
+export function turnText(turn: TranscriptTurn, tidy: boolean): string {
+  return turn.segments
+    .map((segment) => (tidy ? segment.clean_text || segment.text : segment.text).trim())
+    .filter(Boolean)
+    .join(" ");
+}
+
 export function speakerCountLabel(count: number): string {
   return `${count} ${count === 1 ? "speaker" : "speakers"}`;
 }

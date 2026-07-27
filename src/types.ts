@@ -12,7 +12,10 @@ export type TranscriptSegment = {
   id: string;
   start: number;
   end: number;
+  /** Verbatim: what was actually said. */
   text: string;
+  /** Tidied for reading. Empty on transcripts made before cleanup existed. */
+  clean_text?: string;
   speaker: string;
 };
 

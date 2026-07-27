@@ -505,6 +505,19 @@ button:disabled {
   padding: 14px;
 }
 
+.workspace-actions {
+  align-items: center;
+  display: flex;
+  flex: 0 0 auto;
+  gap: 14px;
+}
+
+.workspace-actions .switch-row {
+  color: var(--muted);
+  font-size: 13px;
+  white-space: nowrap;
+}
+
 .segment-time {
   border-right: 1px solid var(--line);
   color: var(--muted);

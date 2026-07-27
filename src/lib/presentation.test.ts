@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { TranscriptSegment } from "../types";
-import { groupSegmentsBySpeaker } from "./presentation";
+import { groupSegmentsBySpeaker, turnText } from "./presentation";
 
 function segment(
   id: string,
@@ -8,8 +8,9 @@ function segment(
   start: number,
   end: number,
   text = "line",
+  clean_text?: string,
 ): TranscriptSegment {
-  return { id, speaker, start, end, text };
+  return { id, speaker, start, end, text, clean_text };
 }
 
 describe("groupSegmentsBySpeaker", () => {
@@ -84,5 +85,39 @@ describe("groupSegmentsBySpeaker", () => {
 
   it("returns nothing for an empty transcript", () => {
     expect(groupSegmentsBySpeaker([])).toEqual([]);
+  });
+});
+
+describe("turnText", () => {
+  const turn = groupSegmentsBySpeaker([
+    segment("a", "SPEAKER_00", 0, 2, "um so I was thinking", "So I was thinking"),
+    segment("b", "SPEAKER_00", 2, 4, "that the the plan works", "that the plan works"),
+  ])[0];
+
+  it("joins a turn into one flowing paragraph", () => {
+    expect(turnText(turn, false)).toBe("um so I was thinking that the the plan works");
+  });
+
+  it("prefers the tidied text when asked", () => {
+    expect(turnText(turn, true)).toBe("So I was thinking that the plan works");
+  });
+
+  it("falls back to verbatim for transcripts made before cleanup existed", () => {
+    const legacy = groupSegmentsBySpeaker([
+      segment("a", "SPEAKER_00", 0, 2, "spoken words", ""),
+      segment("b", "SPEAKER_00", 2, 4, "and more", undefined),
+    ])[0];
+
+    expect(turnText(legacy, true)).toBe("spoken words and more");
+  });
+
+  it("drops segments that cleanup emptied out", () => {
+    const withFiller = groupSegmentsBySpeaker([
+      segment("a", "SPEAKER_00", 0, 1, "real content", "real content"),
+      segment("b", "SPEAKER_00", 1, 2, "um", " "),
+      segment("c", "SPEAKER_00", 2, 3, "more content", "more content"),
+    ])[0];
+
+    expect(turnText(withFiller, true)).toBe("real content more content");
   });
 });

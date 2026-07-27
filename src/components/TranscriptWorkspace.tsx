@@ -1,6 +1,12 @@
 import { Captions, CheckCircle2, FileAudio, Loader2, PlayCircle } from "lucide-react";
+import { useState } from "react";
 import { formatClock, formatDuration, progressLabel } from "../lib/format";
-import { groupSegmentsBySpeaker, speakerCountLabel, statusTone } from "../lib/presentation";
+import {
+  groupSegmentsBySpeaker,
+  speakerCountLabel,
+  statusTone,
+  turnText,
+} from "../lib/presentation";
 import type { Job } from "../types";
 
 type TranscriptWorkspaceProps = {
@@ -8,6 +14,8 @@ type TranscriptWorkspaceProps = {
 };
 
 export function TranscriptWorkspace({ job }: TranscriptWorkspaceProps) {
+  const [tidy, setTidy] = useState(true);
+
   if (!job) {
     return (
       <section className="workspace" aria-label="Transcript editor">
@@ -32,11 +40,23 @@ export function TranscriptWorkspace({ job }: TranscriptWorkspaceProps) {
             {job.model} · {formatDuration(job.duration)} · {speakerCountLabel(job.speakers.length)}
           </p>
         </div>
-        <span className={`status-pill ${statusTone(job.status)}`}>
-          {job.status === "completed" ? <CheckCircle2 size={16} /> : null}
-          {job.status === "running" ? <Loader2 className="spin" size={16} /> : null}
-          {job.status}
-        </span>
+        <div className="workspace-actions">
+          {job.segments.length > 0 ? (
+            <label className="switch-row" title="Remove fillers and stutters for readability">
+              <input
+                type="checkbox"
+                checked={tidy}
+                onChange={(event) => setTidy(event.target.checked)}
+              />
+              <span>Tidy text</span>
+            </label>
+          ) : null}
+          <span className={`status-pill ${statusTone(job.status)}`}>
+            {job.status === "completed" ? <CheckCircle2 size={16} /> : null}
+            {job.status === "running" ? <Loader2 className="spin" size={16} /> : null}
+            {job.status}
+          </span>
+        </div>
       </header>
 
       <div className="progress-card">
@@ -57,12 +77,12 @@ export function TranscriptWorkspace({ job }: TranscriptWorkspaceProps) {
         </div>
       ) : null}
 
-      <TranscriptTimeline job={job} />
+      <TranscriptTimeline job={job} tidy={tidy} />
     </section>
   );
 }
 
-function TranscriptTimeline({ job }: { job: Job }) {
+function TranscriptTimeline({ job, tidy }: { job: Job; tidy: boolean }) {
   if (job.segments.length === 0) {
     return (
       <div className="timeline">
@@ -96,9 +116,7 @@ function TranscriptTimeline({ job }: { job: Job }) {
                 />
                 <strong>{speaker?.name ?? turn.speaker}</strong>
               </div>
-              {turn.segments.map((segment) => (
-                <p key={segment.id}>{segment.text}</p>
-              ))}
+              <p>{turnText(turn, tidy)}</p>
             </div>
           </li>
         );
