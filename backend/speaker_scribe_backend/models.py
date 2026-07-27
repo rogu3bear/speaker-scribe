@@ -38,6 +38,10 @@ class TranscriptSegment(BaseModel):
 
 class Speaker(BaseModel):
     id: str
+    # Stable, globally unique handle for this voice, derived on read from the job
+    # and the speaker label. Positional labels like SPEAKER_00 collide across
+    # jobs; this does not, so a voice can be addressed and linked to.
+    voice_id: str = ""
     name: str
     color: str
     seconds: float = Field(default=0, ge=0)
@@ -82,6 +86,18 @@ class SpeakerRenameRequest(BaseModel):
 class FileJobRequest(BaseModel):
     collection: JobCollection
     title: str | None = None
+
+
+class ModelInfo(BaseModel):
+    value: str
+    repo: str
+    label: str
+    hint: str
+    speed: str
+    download_mb: int
+    state: Literal["available", "missing", "downloading", "error"]
+    size_on_disk: int = 0
+    detail: str | None = None
 
 
 class HealthResponse(BaseModel):

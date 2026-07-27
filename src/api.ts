@@ -2,6 +2,7 @@ import type {
   Health,
   Job,
   JobCollection,
+  ModelInfo,
   SpeakerRenameRequest,
   TranscribeOptions,
 } from "./types";
@@ -22,6 +23,21 @@ async function parseJson<T>(response: Response): Promise<T> {
     throw new Error(message);
   }
   return (await response.json()) as T;
+}
+
+export async function fetchModels(): Promise<ModelInfo[]> {
+  const response = await fetch(`${API_BASE}/api/models`);
+  return parseJson<ModelInfo[]>(response);
+}
+
+export async function downloadModel(value: string): Promise<ModelInfo[]> {
+  const response = await fetch(`${API_BASE}/api/models/${value}/download`, { method: "POST" });
+  return parseJson<ModelInfo[]>(response);
+}
+
+export async function removeModel(value: string): Promise<ModelInfo[]> {
+  const response = await fetch(`${API_BASE}/api/models/${value}`, { method: "DELETE" });
+  return parseJson<ModelInfo[]>(response);
 }
 
 export async function fetchHealth(): Promise<Health> {

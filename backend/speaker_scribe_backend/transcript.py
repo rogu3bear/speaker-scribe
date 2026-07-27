@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import uuid
 from collections import defaultdict
 from collections.abc import Iterable
 from typing import Any
@@ -8,6 +9,26 @@ from .cleanup import clean_text
 from .cleanup import is_sentence_end
 from .models import Speaker
 from .models import TranscriptSegment
+
+
+# Fixed namespace so a voice id is reproducible across runs and machines.
+VOICE_NAMESPACE = uuid.UUID("6f9f4b1a-1c4c-4a5e-9f3a-2f7c0d4e8b11")
+
+
+def voice_id(job_id: str, speaker_id: str) -> str:
+    """A durable handle for one voice within one job.
+
+    Derived rather than stored, so it survives re-reads without a migration and
+    cannot drift out of step with the speaker it names.
+    """
+    return uuid.uuid5(VOICE_NAMESPACE, f"{job_id}:{speaker_id}").hex
+
+
+def with_voice_ids(job_id: str, speakers: list[Speaker]) -> list[Speaker]:
+    return [
+        speaker.model_copy(update={"voice_id": voice_id(job_id, speaker.id)})
+        for speaker in speakers
+    ]
 
 
 def build_segment(

@@ -20,6 +20,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.responses import Response
 
+from . import catalog
 from .exporters import export_json
 from .exporters import export_srt
 from .exporters import export_txt
@@ -27,12 +28,14 @@ from .models import FileJobRequest
 from .models import HealthResponse
 from .models import Job
 from .models import JobCollection
+from .models import ModelInfo
 from .models import SpeakerRenameRequest
 from .models import TranscribeOptions
 from .pipeline import create_transcriber
 from .pipeline import ml_ready
 from .store import JobStore
 from .transcript import with_clean_text
+from .transcript import with_voice_ids
 
 
 @dataclass(frozen=True)
@@ -80,6 +83,68 @@ def health() -> HealthResponse:
         ml_ready=ready,
         detail=detail,
     )
+
+
+@app.get("/api/models", response_model=list[ModelInfo])
+def list_models() -> list[ModelInfo]:
+    sizes = catalog.cached_sizes()
+    transfers = catalog.TRANSFERS.snapshot()
+
+    infos: list[ModelInfo] = []
+    for entry in catalog.CATALOG:
+        transfer = transfers.get(entry.value)
+        on_disk = sizes.get(entry.repo, 0)
+        if transfer == "downloading":
+            state, detail = "downloading", None
+        elif transfer is not None:
+            state, detail = "error", transfer.removeprefix("error: ")
+        elif on_disk > 0:
+            state, detail = "available", None
+        else:
+            state, detail = "missing", None
+
+        infos.append(
+            ModelInfo(
+                value=entry.value,
+                repo=entry.repo,
+                label=entry.label,
+                hint=entry.hint,
+                speed=entry.speed,
+                download_mb=entry.download_mb,
+                state=state,
+                size_on_disk=on_disk,
+                detail=detail,
+            )
+        )
+    return infos
+
+
+@app.post("/api/models/{value}/download", response_model=list[ModelInfo])
+def download_model(value: str) -> list[ModelInfo]:
+    if catalog.entry_for(value) is None:
+        raise HTTPException(status_code=404, detail="Unknown model")
+    # Weights run to gigabytes, so the fetch cannot block the request.
+    catalog.TRANSFERS.mark(value, "downloading")
+    threading.Thread(target=_download_model, args=(value,), daemon=True).start()
+    return list_models()
+
+
+@app.delete("/api/models/{value}", response_model=list[ModelInfo])
+def remove_model(value: str) -> list[ModelInfo]:
+    if catalog.entry_for(value) is None:
+        raise HTTPException(status_code=404, detail="Unknown model")
+    try:
+        catalog.remove(value)
+    except Exception as exc:  # noqa: BLE001 - reported rather than raised as a 500
+        raise HTTPException(status_code=500, detail=f"Could not remove model: {exc}") from exc
+    return list_models()
+
+
+def _download_model(value: str) -> None:
+    try:
+        catalog.download(value)
+    except Exception:  # noqa: BLE001 - state already recorded for the UI
+        pass
 
 
 @app.get("/api/jobs", response_model=list[Job])
@@ -263,6 +328,7 @@ def _with_audio_url(job: Job) -> Job:
         update={
             "audio_url": f"/api/jobs/{job.id}/audio",
             "segments": with_clean_text(job.segments),
+            "speakers": with_voice_ids(job.id, job.speakers),
         }
     )
 

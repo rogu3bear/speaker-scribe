@@ -24,6 +24,8 @@ export type TranscriptSegment = {
 
 export type Speaker = {
   id: string;
+  /** Durable, globally unique handle for this voice. Derived server-side. */
+  voice_id?: string;
   name: string;
   color: string;
   seconds: number;
@@ -51,6 +53,20 @@ export type Job = {
 
 export type SpeakerRenameRequest = {
   speakers: Record<string, string>;
+};
+
+export type ModelState = "available" | "missing" | "downloading" | "error";
+
+export type ModelInfo = {
+  value: string;
+  repo: string;
+  label: string;
+  hint: string;
+  speed: string;
+  download_mb: number;
+  state: ModelState;
+  size_on_disk: number;
+  detail?: string | null;
 };
 
 export type Health = {
