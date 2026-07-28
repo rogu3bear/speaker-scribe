@@ -104,18 +104,33 @@ def model_cache_dir() -> Path:
     return Path.home() / ".cache" / "speaker-scribe"
 
 
+def ffmpeg_path() -> str | None:
+    """Locate ffmpeg, preferring one shipped alongside the app.
+
+    A packaged build carries its own minimal LGPL ffmpeg and points this at it,
+    so the app does not depend on the user having installed one. mlx-whisper also
+    shells out to ffmpeg by bare name, so a packaged build additionally puts that
+    directory on PATH; this only covers our own calls.
+    """
+    override = os.getenv("SPEAKER_SCRIBE_FFMPEG")
+    if override and Path(override).exists():
+        return override
+    return shutil.which("ffmpeg")
+
+
 def load_audio_16k(audio_path: Path) -> Any:
     """Decode any ffmpeg-readable file to mono float32 PCM at 16 kHz."""
     import numpy as np
 
-    if shutil.which("ffmpeg") is None:
+    binary = ffmpeg_path()
+    if binary is None:
         raise RuntimeError(
-            "ffmpeg was not found on PATH. Install it with `brew install ffmpeg` "
-            "before running real transcription."
+            "ffmpeg was not found. Install it with `brew install ffmpeg`, or set "
+            "SPEAKER_SCRIBE_FFMPEG to a binary, before running real transcription."
         )
 
     command = [
-        "ffmpeg",
+        binary,
         "-nostdin",
         "-threads",
         "0",

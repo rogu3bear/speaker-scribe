@@ -17,6 +17,7 @@ from typing import Protocol
 
 from .diarize import LocalDiarizer
 from .diarize import assign_speakers
+from .diarize import ffmpeg_path
 from .models import Speaker
 from .models import TranscribeOptions
 from .models import TranscriptSegment
@@ -185,10 +186,10 @@ class MlxWhisperTranscriber:
                 "before starting real transcription."
             ) from exc
 
-        if shutil.which("ffmpeg") is None:
+        if ffmpeg_path() is None:
             raise RuntimeError(
-                "ffmpeg was not found on PATH. Install it with `brew install ffmpeg` "
-                "before starting real transcription."
+                "ffmpeg was not found. Install it with `brew install ffmpeg`, or set "
+                "SPEAKER_SCRIBE_FFMPEG to a binary, before starting real transcription."
             )
 
         progress(0.03, "Loading MLX Whisper model")
@@ -276,6 +277,6 @@ def ml_ready() -> tuple[bool, str | None]:
     ]
     if missing:
         return False, f"missing packages: {', '.join(missing)} — run `uv sync --extra ml`"
-    if shutil.which("ffmpeg") is None:
-        return False, "ffmpeg not found on PATH — run `brew install ffmpeg`"
+    if ffmpeg_path() is None:
+        return False, "ffmpeg not found — run `brew install ffmpeg`"
     return True, None

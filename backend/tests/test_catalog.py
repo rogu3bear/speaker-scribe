@@ -132,3 +132,124 @@ def test_remove_reports_a_failure_rather_than_a_bare_500(monkeypatch, tmp_path: 
 
     assert response.status_code == 500
     assert "read-only file system" in response.json()["detail"]
+
+
+# --- Weights shipped inside the packaged app -------------------------------
+#
+# The bundle is read-only and is replaced wholesale on update, so it cannot be
+# the cache itself. These cover the copy out of it, which is the only reason a
+# freshly installed app can transcribe without reaching the network.
+
+
+def bundle_with(root: Path, *, hub: str | None = None, speechbrain: str | None = None) -> Path:
+    """Build the directory layout the app ships, with placeholder weights."""
+    source = root / "bundled"
+    if hub is not None:
+        blobs = source / "hub" / hub / "blobs"
+        blobs.mkdir(parents=True)
+        (blobs / "abc123").write_bytes(b"weights")
+        snapshot = source / "hub" / hub / "snapshots" / "deadbeef"
+        snapshot.mkdir(parents=True)
+        # The hub stores each file once and links the snapshot at the blob.
+        (snapshot / "weights.safetensors").symlink_to("../../blobs/abc123")
+    if speechbrain is not None:
+        saved = source / "speechbrain" / speechbrain
+        saved.mkdir(parents=True)
+        (saved / "hyperparams.yaml").write_text("placeholder")
+    return source
+
+
+def test_seeding_does_nothing_when_the_app_ships_no_weights(monkeypatch) -> None:
+    monkeypatch.delenv(catalog.BUNDLED_MODELS_ENV, raising=False)
+
+    assert catalog.seed_bundled_models() == []
+
+
+def test_seeding_ignores_a_bundle_path_that_is_not_there(monkeypatch, tmp_path: Path) -> None:
+    """A stale environment variable must not stop the server starting."""
+    monkeypatch.setenv(catalog.BUNDLED_MODELS_ENV, str(tmp_path / "gone"))
+
+    assert catalog.seed_bundled_models() == []
+
+
+def test_seeding_copies_the_embedding_model_where_speechbrain_looks(
+    monkeypatch, tmp_path: Path
+) -> None:
+    source = bundle_with(tmp_path, speechbrain="spkrec-ecapa-voxceleb")
+    monkeypatch.setenv(catalog.BUNDLED_MODELS_ENV, str(source))
+    monkeypatch.setenv("SPEAKER_SCRIBE_MODEL_CACHE", str(tmp_path / "cache"))
+
+    seeded = catalog.seed_bundled_models()
+
+    assert seeded == ["speechbrain/spkrec-ecapa-voxceleb"]
+    assert (tmp_path / "cache" / "spkrec-ecapa-voxceleb" / "hyperparams.yaml").is_file()
+
+
+def test_seeding_leaves_an_existing_model_untouched(monkeypatch, tmp_path: Path) -> None:
+    """Seeding runs on every start; it must not overwrite what is already there."""
+    source = bundle_with(tmp_path, speechbrain="spkrec-ecapa-voxceleb")
+    monkeypatch.setenv(catalog.BUNDLED_MODELS_ENV, str(source))
+    monkeypatch.setenv("SPEAKER_SCRIBE_MODEL_CACHE", str(tmp_path / "cache"))
+    existing = tmp_path / "cache" / "spkrec-ecapa-voxceleb"
+    existing.mkdir(parents=True)
+    (existing / "hyperparams.yaml").write_text("the user's own copy")
+
+    assert catalog.seed_bundled_models() == []
+    assert (existing / "hyperparams.yaml").read_text() == "the user's own copy"
+
+
+def test_seeding_copies_a_whisper_model_into_the_hub_cache(monkeypatch, tmp_path: Path) -> None:
+    constants = pytest.importorskip("huggingface_hub.constants")
+    name = "models--mlx-community--whisper-small-mlx"
+    source = bundle_with(tmp_path, hub=name)
+    monkeypatch.setenv(catalog.BUNDLED_MODELS_ENV, str(source))
+    monkeypatch.setattr(constants, "HF_HUB_CACHE", str(tmp_path / "hub"))
+
+    seeded = catalog.seed_bundled_models()
+
+    assert seeded == [name]
+    assert (tmp_path / "hub" / name / "blobs" / "abc123").read_bytes() == b"weights"
+
+
+def test_seeding_keeps_the_hub_symlinks_rather_than_duplicating_weights(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """Resolving them would store every model twice and double the app's size."""
+    constants = pytest.importorskip("huggingface_hub.constants")
+    name = "models--mlx-community--whisper-small-mlx"
+    source = bundle_with(tmp_path, hub=name)
+    monkeypatch.setenv(catalog.BUNDLED_MODELS_ENV, str(source))
+    monkeypatch.setattr(constants, "HF_HUB_CACHE", str(tmp_path / "hub"))
+
+    catalog.seed_bundled_models()
+
+    copied = tmp_path / "hub" / name / "snapshots" / "deadbeef" / "weights.safetensors"
+    assert copied.is_symlink()
+    assert copied.read_bytes() == b"weights"
+
+
+def test_seeding_reports_both_kinds_of_weight(monkeypatch, tmp_path: Path) -> None:
+    constants = pytest.importorskip("huggingface_hub.constants")
+    name = "models--mlx-community--whisper-small-mlx"
+    source = bundle_with(tmp_path, hub=name, speechbrain="spkrec-ecapa-voxceleb")
+    monkeypatch.setenv(catalog.BUNDLED_MODELS_ENV, str(source))
+    monkeypatch.setenv("SPEAKER_SCRIBE_MODEL_CACHE", str(tmp_path / "cache"))
+    monkeypatch.setattr(constants, "HF_HUB_CACHE", str(tmp_path / "hub"))
+
+    assert catalog.seed_bundled_models() == [name, "speechbrain/spkrec-ecapa-voxceleb"]
+
+
+def test_a_failed_copy_leaves_no_half_written_model(monkeypatch, tmp_path: Path) -> None:
+    """A partial copy that looked complete would resurface later as a bad model."""
+    source = bundle_with(tmp_path, speechbrain="spkrec-ecapa-voxceleb")
+    monkeypatch.setenv(catalog.BUNDLED_MODELS_ENV, str(source))
+    monkeypatch.setenv("SPEAKER_SCRIBE_MODEL_CACHE", str(tmp_path / "cache"))
+
+    def fail(*args, **kwargs):
+        (tmp_path / "cache" / ".spkrec-ecapa-voxceleb.incoming").mkdir(parents=True)
+        raise OSError("no space left on device")
+
+    monkeypatch.setattr(catalog.shutil, "copytree", fail)
+
+    assert catalog.seed_bundled_models() == []
+    assert list((tmp_path / "cache").iterdir()) == []

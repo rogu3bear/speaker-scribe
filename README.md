@@ -8,6 +8,20 @@ Speaker Scribe is a local-first web app for turning audio files into transcripts
 fictional people discussing an onboarding flow — because a demo should not ship
 somebody's actual recording. Rebuild it with `./scripts/record-demo.sh`.*
 
+## Download
+
+The macOS app is self-contained. It carries its own Python, the speech stack, an
+ffmpeg, and enough model weights to transcribe and diarize the first file you
+open, so it runs on a Mac with nothing else installed and no network connection.
+
+**[Download the latest release](https://github.com/rogu3bear/speaker-scribe/releases/latest)**
+— Apple Silicon, macOS 13 or later.
+
+The `small` Whisper model is included. Larger ones are downloaded from the model
+picker inside the app, when you ask for them.
+
+Everything below is for running from source or working on it.
+
 ## What It Does
 
 - Upload WAV, MP3, M4A, FLAC, or AAC audio files.
@@ -27,6 +41,8 @@ Speaker Scribe cannot infer real human names from arbitrary audio by itself. It 
 - Runtime storage: local `data/` folder with uploaded audio and `jobs.json`.
 
 ## Requirements
+
+These are for running from source. The released app needs none of them.
 
 - macOS on Apple Silicon for the intended MLX path.
 - `ffmpeg` available on PATH for audio decoding (`brew install ffmpeg`).
@@ -91,9 +107,22 @@ To prove the base install still works on its own, run the suite in an environmen
 the `ml` extra removed:
 
 ```bash
-uv run --exact --extra test pytest backend/tests -q
-uv sync --extra ml --extra test   # restore afterwards
+UV_PROJECT_ENVIRONMENT=build/base-venv uv run --exact --extra test pytest backend/tests -q
 ```
+
+`UV_PROJECT_ENVIRONMENT` puts that environment somewhere else, so `.venv` keeps
+the `ml` extra and a server running against it is unaffected. Without it,
+`--exact` strips the speech stack out of the environment in use.
+
+## Packaging
+
+```bash
+./scripts/build-app.sh        # builds the runtime and weights first if needed
+./scripts/verify-bundle.sh    # proves the result runs offline, on its own
+```
+
+See [docs/packaging.md](docs/packaging.md) for what goes into the bundle, why the
+runtime is not a virtualenv, and how signing and notarization work.
 
 ## Open Source
 

@@ -10,7 +10,9 @@ Speaker embeddings are voice prints, and voice prints are biometric data. This h
 even though every byte stays on the user's machine.
 
 - A voice profile stores embeddings and a user-chosen name. It never stores audio.
-- Profiles live under the local `data/` tree and are never transmitted anywhere.
+- Profiles live under the local data tree and are never transmitted anywhere. That is
+  `data/` when running from source, and `~/Library/Application Support/` in the packaged
+  app, which writes nothing inside its own bundle.
 - A profile is created only by an explicit user action on a completed job. Running a
   transcript never enrolls anyone.
 - Every profile is individually deletable, and deleting one removes its stored vectors.
@@ -26,6 +28,8 @@ different product and is out of scope.
 - FastAPI owns uploads, jobs, local storage, and exports.
 - `mlx-whisper` transcribes; diarization is Silero VAD, SpeechBrain ECAPA embeddings, and clustering.
 - Every speech model is loaded lazily so the app can build and test without downloading models.
+- The packaged app ships the weights it needs to work offline, so a first run makes no
+  network request at all. Larger models are fetched only when the user asks for one.
 - Diarization runs entirely on-machine and requires no account, token, or hosted service.
 - `SPEAKER_SCRIBE_ENGINE=mock` is the sanctioned local smoke lane.
 

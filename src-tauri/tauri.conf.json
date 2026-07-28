@@ -14,14 +14,22 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["app", "dmg"],
+    "targets": ["app"],
     "icon": ["icons/icon.icns"],
     "copyright": "MIT licensed. Audio never leaves this machine.",
     "category": "Productivity",
     "shortDescription": "Local transcription with speaker turns",
     "longDescription": "Turns audio files into transcripts with speaker turns, entirely on this machine. No account, no API key, no upload.",
+    "resources": {
+      "../build/runtime/py": "runtime",
+      "../build/models": "models",
+      "../build/ffmpeg/bin/ffmpeg": "ffmpeg",
+      "../backend/speaker_scribe_backend": "backend/speaker_scribe_backend",
+      "../dist": "dist"
+    },
     "macOS": {
-      "minimumSystemVersion": "13.0"
+      "minimumSystemVersion": "13.0",
+      "entitlements": "entitlements.plist"
     }
   }
 }

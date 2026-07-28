@@ -1,4 +1,4 @@
-import type { Job, JobCollection, JobStatus, TranscriptSegment } from "../types";
+import type { Job, JobCollection, JobStatus, ModelInfo, TranscriptSegment } from "../types";
 
 export const COLLECTIONS: { key: JobCollection; label: string; empty: string }[] = [
   { key: "inbox", label: "Inbox", empty: "No jobs yet." },
@@ -87,4 +87,23 @@ export function turnText(turn: TranscriptTurn, tidy: boolean): string {
 
 export function speakerCountLabel(count: number): string {
   return `${count} ${count === 1 ? "speaker" : "speakers"}`;
+}
+
+/**
+ * The best model already on disk, or undefined if none is.
+ *
+ * A fixed default is wrong in both directions. On a fresh install of the
+ * packaged app only the shipped model is present, and defaulting to a larger one
+ * turns the first transcription into a multi-gigabyte download — or a failure,
+ * on the offline machine the app is built to work on. On a machine that has
+ * pulled down the large models, defaulting to the small one quietly downgrades
+ * every transcript.
+ *
+ * Picking what is present resolves both. The backend returns the catalog in
+ * ascending order of accuracy, so the last available entry is the best one; the
+ * ordering is not restated here, because a second copy of it would drift from
+ * the first.
+ */
+export function preferredModel(models: ModelInfo[]): string | undefined {
+  return models.filter((model) => model.state === "available").at(-1)?.value;
 }

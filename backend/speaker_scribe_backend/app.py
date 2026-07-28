@@ -59,6 +59,9 @@ async def lifespan(api: FastAPI) -> AsyncIterator[None]:
     # this module — as any pytest run from the repository root does — cannot
     # rewrite a store that another process is actively working on.
     api.state.store.fail_interrupted_jobs()
+    # A packaged app ships weights inside itself; move them into the writable
+    # cache so the first run works with no network. A no-op everywhere else.
+    catalog.seed_bundled_models()
     yield
 
 
