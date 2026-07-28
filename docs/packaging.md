@@ -176,13 +176,16 @@ xcrun notarytool store-credentials speaker-scribe \
 
 # Per release
 SIGN_IDENTITY="Developer ID Application: YOUR NAME (TEAMID)" ./scripts/build-app.sh
-
-BUNDLE=src-tauri/target/release/bundle
-xcrun notarytool submit "$BUNDLE"/dmg/*.dmg --keychain-profile speaker-scribe --wait
-xcrun stapler staple "$BUNDLE"/dmg/*.dmg
-xcrun stapler staple "$BUNDLE/macos/Speaker Scribe.app"
-spctl --assess --type execute -vv "$BUNDLE/macos/Speaker Scribe.app"
+./scripts/verify-bundle.sh
+./scripts/notarize.sh
 ```
+
+`notarize.sh` submits, staples both the image and the app, and then asks
+Gatekeeper for a verdict, failing unless it answers `source=Notarized Developer
+ID`. It assesses the copy inside the disk image rather than the one in the build
+directory, because that is the copy a user receives and the two diverge if
+anything has run the app in place since it was built. It prints the SHA-256 to
+publish alongside the download.
 
 `--wait` blocks until Apple returns a verdict, which for a bundle this size takes
 longer than it does for a small one. On rejection,
