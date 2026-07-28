@@ -1,6 +1,12 @@
 # Speaker Scribe
 
-Speaker Scribe is a local-first web app for turning audio files into transcripts with speaker turns. It uses an Apple Silicon-friendly stack: `mlx-whisper` for Whisper transcription through MLX, and a fully local diarizer built from Silero VAD, SpeechBrain ECAPA speaker embeddings, and clustering. No account, API key, or hosted service is involved.
+Turn recordings into transcripts with speaker turns, entirely on your Mac. No account, no API key, no upload — MLX Whisper for transcription, and a local diarizer built from Silero VAD, SpeechBrain ECAPA embeddings and clustering.
+
+### **[Download for macOS](https://github.com/rogu3bear/speaker-scribe/releases/latest)**
+
+Apple Silicon, macOS 13 or later. Signed and notarized, so it opens without the right-click dance.
+
+The app is self-contained: it carries its own Python, the whole speech stack, an ffmpeg, and the `small` Whisper model. Nothing to install, and the first launch works with the machine offline. Larger models are downloaded from the picker inside the app, when you ask for them.
 
 ![Speaker Scribe: pooled speaker turns, a tidy-text toggle, per-voice statistics, and the model cache](docs/demo.gif)
 
@@ -8,19 +14,8 @@ Speaker Scribe is a local-first web app for turning audio files into transcripts
 fictional people discussing an onboarding flow — because a demo should not ship
 somebody's actual recording. Rebuild it with `./scripts/record-demo.sh`.*
 
-## Download
-
-The macOS app is self-contained. It carries its own Python, the speech stack, an
-ffmpeg, and enough model weights to transcribe and diarize the first file you
-open, so it runs on a Mac with nothing else installed and no network connection.
-
-**[Download the latest release](https://github.com/rogu3bear/speaker-scribe/releases/latest)**
-— Apple Silicon, macOS 13 or later.
-
-The `small` Whisper model is included. Larger ones are downloaded from the model
-picker inside the app, when you ask for them.
-
-Everything below is for running from source or working on it.
+Everything below is for running from source or working on it. You do not need any
+of it to use the app.
 
 ## What It Does
 
@@ -38,7 +33,9 @@ Speaker Scribe cannot infer real human names from arbitrary audio by itself. It 
 - Frontend: Vite, React, TypeScript, lucide-react.
 - Backend: FastAPI, Pydantic, uvicorn.
 - Speech stack: optional `ml` extra with `mlx-whisper`, `silero-vad`, `speechbrain`, and `scikit-learn`.
-- Runtime storage: local `data/` folder with uploaded audio and `jobs.json`.
+- Desktop shell: Tauri 2, using the system WebView rather than shipping a browser.
+- Website: Leptos on Cloudflare Workers, in [`web/`](web/).
+- Runtime storage: a local folder with uploaded audio and `jobs.json` — `data/` from source, `~/Library/Application Support/` in the packaged app, which writes nothing inside its own bundle.
 
 ## Requirements
 
@@ -123,6 +120,15 @@ the `ml` extra and a server running against it is unaffected. Without it,
 
 See [docs/packaging.md](docs/packaging.md) for what goes into the bundle, why the
 runtime is not a virtualenv, and how signing and notarization work.
+
+`./scripts/notarize.sh` submits the disk image, staples the ticket, and then asks
+Gatekeeper for a verdict rather than assuming one.
+
+## Website
+
+[`web/`](web/) is the site, built with Leptos and served from Cloudflare Workers.
+Its terms and privacy pages are compiled from `docs/legal/*.md` — the same files
+the app ships — so the two cannot drift.
 
 ## Open Source
 
