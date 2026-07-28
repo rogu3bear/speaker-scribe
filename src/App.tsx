@@ -1,14 +1,24 @@
 import { AlertTriangle, Mic2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { ChangeEvent, FormEvent } from "react";
-import { fetchHealth, fetchJob, fetchJobs, renameSpeakers, uploadAudio } from "./api";
+import {
+  downloadModel,
+  fetchHealth,
+  fetchJob,
+  fetchJobs,
+  fetchModels,
+  fileJob,
+  removeModel,
+  renameSpeakers,
+  uploadAudio,
+} from "./api";
 import { JobList } from "./components/JobList";
 import { SpeakerPanel } from "./components/SpeakerPanel";
 import { TranscriptWorkspace } from "./components/TranscriptWorkspace";
 import { UploadPanel } from "./components/UploadPanel";
 import { DEFAULT_TRANSCRIBE_OPTIONS } from "./constants";
 import { canPollJob } from "./lib/presentation";
-import type { Health, Job, Speaker, TranscribeOptions } from "./types";
+import type { Health, Job, JobCollection, ModelInfo, Speaker, TranscribeOptions } from "./types";
 
 function App() {
   const [jobs, setJobs] = useState<Job[]>([]);
@@ -18,6 +28,9 @@ function App() {
   const [uploading, setUploading] = useState(false);
   const [apiNotice, setApiNotice] = useState<string | null>(null);
   const [health, setHealth] = useState<Health | null>(null);
+  const [collection, setCollection] = useState<JobCollection>("inbox");
+  const [models, setModels] = useState<ModelInfo[]>([]);
+  const [busyModel, setBusyModel] = useState<string | null>(null);
 
   const activeJob = jobs.find((job) => job.id === activeJobId) ?? null;
 
@@ -51,6 +64,58 @@ function App() {
       .then(setHealth)
       .catch(() => setHealth(null));
   }, []);
+
+  useEffect(() => {
+    void refreshModels();
+  }, []);
+
+  // A download runs on a worker thread, so poll while one is in flight.
+  useEffect(() => {
+    if (!models.some((model) => model.state === "downloading")) {
+      return;
+    }
+    const handle = window.setInterval(() => void refreshModels(), 3000);
+    return () => window.clearInterval(handle);
+  }, [models]);
+
+  async function refreshModels() {
+    try {
+      setModels(await fetchModels());
+    } catch {
+      // The picker falls back to whatever it already has.
+    }
+  }
+
+  async function startModelDownload(value: string) {
+    setBusyModel(value);
+    try {
+      setModels(await downloadModel(value));
+      setApiNotice(null);
+    } catch (error) {
+      setApiNotice(error instanceof Error ? error.message : "Could not start the download");
+    } finally {
+      setBusyModel(null);
+    }
+  }
+
+  async function deleteModel(model: ModelInfo) {
+    const confirmed = window.confirm(
+      `Remove ${model.label}? This frees disk space and the weights are re-downloaded ` +
+        "the next time the model is used.",
+    );
+    if (!confirmed) {
+      return;
+    }
+    setBusyModel(model.value);
+    try {
+      setModels(await removeModel(model.value));
+      setApiNotice(null);
+    } catch (error) {
+      setApiNotice(error instanceof Error ? error.message : "Could not remove that model");
+    } finally {
+      setBusyModel(null);
+    }
+  }
 
   useEffect(() => {
     if (!canPollJob(activeJob)) {
@@ -102,6 +167,15 @@ function App() {
     }
   }
 
+  async function moveJob(job: Job, next: JobCollection) {
+    try {
+      replaceJob(await fileJob(job.id, next));
+      setApiNotice(null);
+    } catch (error) {
+      setApiNotice(error instanceof Error ? error.message : "Could not move that transcript");
+    }
+  }
+
   async function updateSpeakerName(speaker: Speaker, name: string) {
     if (!activeJob) {
       return;
@@ -146,9 +220,13 @@ function App() {
           selectedFile={selectedFile}
           options={options}
           uploading={uploading}
+          models={models}
+          busyModel={busyModel}
           onFileChange={onFileChange}
           onOptionChange={updateOption}
           onSubmit={onSubmit}
+          onDownloadModel={(value) => void startModelDownload(value)}
+          onRemoveModel={(model) => void deleteModel(model)}
         />
 
         {apiNotice ? (
@@ -161,7 +239,10 @@ function App() {
         <JobList
           jobs={jobs}
           activeJobId={activeJobId}
+          collection={collection}
           onSelectJob={setActiveJobId}
+          onSelectCollection={setCollection}
+          onFileJob={(job, next) => void moveJob(job, next)}
           onRefresh={() => void refreshJobs()}
         />
       </aside>

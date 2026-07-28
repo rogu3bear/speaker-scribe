@@ -1,27 +1,35 @@
 import { Loader2, UploadCloud } from "lucide-react";
 import type { ChangeEvent, FormEvent } from "react";
-import { MODEL_OPTIONS } from "../constants";
-import type { TranscribeOptions } from "../types";
+import type { ModelInfo, TranscribeOptions } from "../types";
+import { CacheSummary, ModelPicker } from "./ModelPicker";
 
 type UploadPanelProps = {
   selectedFile: File | null;
   options: TranscribeOptions;
   uploading: boolean;
+  models: ModelInfo[];
+  busyModel: string | null;
   onFileChange: (event: ChangeEvent<HTMLInputElement>) => void;
   onOptionChange: <K extends keyof TranscribeOptions>(
     key: K,
     value: TranscribeOptions[K],
   ) => void;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
+  onDownloadModel: (value: string) => void;
+  onRemoveModel: (model: ModelInfo) => void;
 };
 
 export function UploadPanel({
   selectedFile,
   options,
   uploading,
+  models,
+  busyModel,
   onFileChange,
   onOptionChange,
   onSubmit,
+  onDownloadModel,
+  onRemoveModel,
 }: UploadPanelProps) {
   return (
     <form className="upload-panel" onSubmit={onSubmit}>
@@ -32,19 +40,18 @@ export function UploadPanel({
         <input type="file" accept="audio/*,.m4a,.mp3,.wav,.flac,.aac" onChange={onFileChange} />
       </label>
 
-      <label className="field">
+      <div className="field">
         <span>MLX model</span>
-        <select
+        <ModelPicker
+          models={models}
           value={options.model}
-          onChange={(event) => onOptionChange("model", event.target.value)}
-        >
-          {MODEL_OPTIONS.map((model) => (
-            <option key={model.value} value={model.value}>
-              {model.label}
-            </option>
-          ))}
-        </select>
-      </label>
+          busy={busyModel}
+          onSelect={(value) => onOptionChange("model", value)}
+          onDownload={onDownloadModel}
+          onRemove={onRemoveModel}
+        />
+        <CacheSummary models={models} />
+      </div>
 
       <label className="switch-row">
         <input

@@ -3,10 +3,16 @@ from __future__ import annotations
 import importlib.util
 import os
 import shutil
+import sys
+import threading
 import time
 from collections.abc import Callable
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
+from types import SimpleNamespace
+from typing import Any
 from typing import Protocol
 
 from .diarize import LocalDiarizer
@@ -18,6 +24,14 @@ from .transcript import build_speakers
 from .transcript import normalize_transcription_result
 
 ProgressCallback = Callable[[float, str], None]
+
+# Transcription dominates wall clock — roughly 70s of an 84s run on a 15-minute
+# recording — so it owns most of the bar. Diarization reports its own progress
+# across the remainder. Without diarization transcription runs to the end.
+TRANSCRIBE_PROGRESS_START = 0.05
+TRANSCRIBE_PROGRESS_END_WITH_DIARIZATION = 0.78
+TRANSCRIBE_PROGRESS_END = 0.95
+TRANSCRIBING_STAGE = "Transcribing audio with MLX Whisper"
 
 # mlx-whisper loads weights by Hugging Face repo id, so the short names the UI
 # offers are mapped onto their MLX conversions. Anything else is passed through,
@@ -65,6 +79,95 @@ def resolve_model(model: str) -> str:
     return MLX_MODEL_ALIASES.get(model, model)
 
 
+# Which job's progress the running thread is reporting. Jobs run one per thread,
+# so the sink has to be thread-local: a shared one would cross wires between two
+# uploads processing at the same time.
+_SINK = threading.local()
+
+
+class FrameProgressBar:
+    """Stands in for mlx-whisper's internal tqdm bar and forwards its updates.
+
+    mlx-whisper exposes no progress callback, but it drives a tqdm bar over audio
+    frames and looks it up as a module attribute at call time. Standing in for
+    that attribute is the only way to see inside the single long call that
+    dominates a job, which otherwise leaves the UI frozen for minutes.
+    """
+
+    def __init__(self, sink: tuple[ProgressCallback, float, float] | None, total: int) -> None:
+        self._sink = sink
+        self._total = total
+        self._done = 0
+
+    def __enter__(self) -> "FrameProgressBar":
+        return self
+
+    def __exit__(self, *_exc: object) -> bool:
+        return False
+
+    def update(self, amount: int = 1) -> None:
+        self._done += amount
+        if self._sink is None or self._total <= 0:
+            return
+        report, start, end = self._sink
+        fraction = min(1.0, max(0.0, self._done / self._total))
+        report(start + (end - start) * fraction, TRANSCRIBING_STAGE)
+
+    def close(self) -> None:
+        return None
+
+
+def _new_frame_bar(*_args: Any, total: int | None = None, **_kwargs: Any) -> FrameProgressBar:
+    """Build a bar bound to the calling thread's job. One per transcription."""
+    return FrameProgressBar(getattr(_SINK, "target", None), total or 0)
+
+
+def _install_frame_bar() -> bool:
+    """Put the stand-in in place once. Never restored, so it cannot be inverted.
+
+    Save-and-restore around each call looked natural and was wrong: with two jobs
+    in flight the second captures the first's stand-in as the "original" and puts
+    it back on exit, leaving the module permanently pointed at a finished job's
+    callback. Installing once and routing through a thread-local removes the
+    restore step that made that possible.
+    """
+    try:
+        import mlx_whisper  # noqa: F401
+    except ImportError:
+        return False
+
+    # Must come from sys.modules: mlx_whisper/__init__.py rebinds the name
+    # `transcribe` to the function, so `mlx_whisper.transcribe` is not the module.
+    module = sys.modules.get("mlx_whisper.transcribe")
+    existing = getattr(module, "tqdm", None) if module is not None else None
+    if existing is None:
+        return False
+    if getattr(existing, "speaker_scribe_bar", False):
+        return True
+
+    module.tqdm = SimpleNamespace(tqdm=_new_frame_bar, speaker_scribe_bar=True)
+    return True
+
+
+@contextmanager
+def frame_progress(report: ProgressCallback, start: float, end: float) -> Iterator[None]:
+    """Route mlx-whisper's frame counter into `report` for the duration of a call.
+
+    Degrades to no progress updates rather than failing the job if the internals
+    ever move; transcription itself is unaffected either way.
+    """
+    if not _install_frame_bar():
+        yield
+        return
+
+    previous = getattr(_SINK, "target", None)
+    _SINK.target = (report, start, end)
+    try:
+        yield
+    finally:
+        _SINK.target = previous
+
+
 class MlxWhisperTranscriber:
     """MLX Whisper transcription plus local, account-free diarization."""
 
@@ -88,25 +191,29 @@ class MlxWhisperTranscriber:
                 "before starting real transcription."
             )
 
-        progress(0.1, "Loading MLX Whisper model")
-        transcribe_kwargs: dict[str, object] = {"word_timestamps": True}
+        progress(0.03, "Loading MLX Whisper model")
+        # verbose=False is what enables mlx-whisper's frame counter; None disables it.
+        transcribe_kwargs: dict[str, object] = {"word_timestamps": True, "verbose": False}
         if options.language:
             transcribe_kwargs["language"] = options.language
 
-        progress(0.18, "Transcribing audio with MLX Whisper")
-        result = mlx_whisper.transcribe(
-            str(audio_path),
-            path_or_hf_repo=resolve_model(options.model),
-            **transcribe_kwargs,
+        transcribe_end = (
+            TRANSCRIBE_PROGRESS_END_WITH_DIARIZATION if options.diarize else TRANSCRIBE_PROGRESS_END
         )
+        progress(TRANSCRIBE_PROGRESS_START, TRANSCRIBING_STAGE)
+        with frame_progress(progress, TRANSCRIBE_PROGRESS_START, transcribe_end):
+            result = mlx_whisper.transcribe(
+                str(audio_path),
+                path_or_hf_repo=resolve_model(options.model),
+                **transcribe_kwargs,
+            )
         language = str(result.get("language") or options.language or "") or None
 
         if options.diarize:
-            progress(0.5, "Preparing audio for speaker analysis")
             turns = LocalDiarizer().diarize(audio_path, options, progress)
             result = assign_speakers(result, turns)
 
-        progress(0.9, "Normalizing transcript segments")
+        progress(0.97, "Normalizing transcript segments")
         segments, duration = normalize_transcription_result(result)
         return TranscriptionResult(segments=segments, duration=duration, language=language)
 

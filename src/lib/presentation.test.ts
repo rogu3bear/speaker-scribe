@@ -1,6 +1,24 @@
 import { describe, expect, it } from "vitest";
 import type { TranscriptSegment } from "../types";
-import { groupSegmentsBySpeaker } from "./presentation";
+import type { Job } from "../types";
+import { groupSegmentsBySpeaker, jobTitle, jobsInCollection, turnText } from "./presentation";
+
+function job(id: string, fields: Partial<Job> = {}): Job {
+  return {
+    id,
+    original_name: `${id}.m4a`,
+    filename: `${id}-audio.m4a`,
+    created_at: "2026-07-01T00:00:00Z",
+    status: "completed",
+    progress: 1,
+    stage: "Transcript complete",
+    model: "large-v3",
+    diarize: true,
+    speakers: [],
+    segments: [],
+    ...fields,
+  };
+}
 
 function segment(
   id: string,
@@ -8,8 +26,9 @@ function segment(
   start: number,
   end: number,
   text = "line",
+  clean_text?: string,
 ): TranscriptSegment {
-  return { id, speaker, start, end, text };
+  return { id, speaker, start, end, text, clean_text };
 }
 
 describe("groupSegmentsBySpeaker", () => {
@@ -84,5 +103,77 @@ describe("groupSegmentsBySpeaker", () => {
 
   it("returns nothing for an empty transcript", () => {
     expect(groupSegmentsBySpeaker([])).toEqual([]);
+  });
+});
+
+describe("jobsInCollection", () => {
+  const jobs = [
+    job("a", { collection: "inbox" }),
+    job("b", { collection: "saved" }),
+    job("c", { collection: "archived" }),
+    job("d"),
+  ];
+
+  it("filters to one collection", () => {
+    expect(jobsInCollection(jobs, "saved").map((item) => item.id)).toEqual(["b"]);
+    expect(jobsInCollection(jobs, "archived").map((item) => item.id)).toEqual(["c"]);
+  });
+
+  it("treats a job with no collection as inbox", () => {
+    expect(jobsInCollection(jobs, "inbox").map((item) => item.id)).toEqual(["a", "d"]);
+  });
+
+  it("never loses a job between collections", () => {
+    const filed = (["inbox", "saved", "archived"] as const).flatMap((key) =>
+      jobsInCollection(jobs, key),
+    );
+
+    expect(filed).toHaveLength(jobs.length);
+  });
+});
+
+describe("jobTitle", () => {
+  it("prefers a chosen title", () => {
+    expect(jobTitle(job("a", { title: "Donella interview" }))).toBe("Donella interview");
+  });
+
+  it("falls back to the file name when the title is missing or blank", () => {
+    expect(jobTitle(job("a"))).toBe("a.m4a");
+    expect(jobTitle(job("a", { title: "   " }))).toBe("a.m4a");
+    expect(jobTitle(job("a", { title: null }))).toBe("a.m4a");
+  });
+});
+
+describe("turnText", () => {
+  const turn = groupSegmentsBySpeaker([
+    segment("a", "SPEAKER_00", 0, 2, "um so I was thinking", "So I was thinking"),
+    segment("b", "SPEAKER_00", 2, 4, "that the the plan works", "that the plan works"),
+  ])[0];
+
+  it("joins a turn into one flowing paragraph", () => {
+    expect(turnText(turn, false)).toBe("um so I was thinking that the the plan works");
+  });
+
+  it("prefers the tidied text when asked", () => {
+    expect(turnText(turn, true)).toBe("So I was thinking that the plan works");
+  });
+
+  it("falls back to verbatim for transcripts made before cleanup existed", () => {
+    const legacy = groupSegmentsBySpeaker([
+      segment("a", "SPEAKER_00", 0, 2, "spoken words", ""),
+      segment("b", "SPEAKER_00", 2, 4, "and more", undefined),
+    ])[0];
+
+    expect(turnText(legacy, true)).toBe("spoken words and more");
+  });
+
+  it("drops segments that cleanup emptied out", () => {
+    const withFiller = groupSegmentsBySpeaker([
+      segment("a", "SPEAKER_00", 0, 1, "real content", "real content"),
+      segment("b", "SPEAKER_00", 1, 2, "um", " "),
+      segment("c", "SPEAKER_00", 2, 3, "more content", "more content"),
+    ])[0];
+
+    expect(turnText(withFiller, true)).toBe("real content more content");
   });
 });

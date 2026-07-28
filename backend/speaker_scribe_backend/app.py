@@ -19,17 +19,24 @@ from fastapi import UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.responses import Response
+from fastapi.staticfiles import StaticFiles
 
+from . import catalog
 from .exporters import export_json
 from .exporters import export_srt
 from .exporters import export_txt
+from .models import FileJobRequest
 from .models import HealthResponse
 from .models import Job
+from .models import JobCollection
+from .models import ModelInfo
 from .models import SpeakerRenameRequest
 from .models import TranscribeOptions
 from .pipeline import create_transcriber
 from .pipeline import ml_ready
 from .store import JobStore
+from .transcript import with_clean_text
+from .transcript import with_voice_ids
 
 
 @dataclass(frozen=True)
@@ -79,9 +86,76 @@ def health() -> HealthResponse:
     )
 
 
+@app.get("/api/models", response_model=list[ModelInfo])
+def list_models() -> list[ModelInfo]:
+    sizes = catalog.cached_sizes()
+    transfers = catalog.TRANSFERS.snapshot()
+
+    infos: list[ModelInfo] = []
+    for entry in catalog.CATALOG:
+        transfer = transfers.get(entry.value)
+        on_disk = sizes.get(entry.repo, 0)
+        if transfer == "downloading":
+            state, detail = "downloading", None
+        elif transfer is not None:
+            state, detail = "error", transfer.removeprefix("error: ")
+        elif on_disk > 0:
+            state, detail = "available", None
+        else:
+            state, detail = "missing", None
+
+        infos.append(
+            ModelInfo(
+                value=entry.value,
+                repo=entry.repo,
+                label=entry.label,
+                hint=entry.hint,
+                speed=entry.speed,
+                download_mb=entry.download_mb,
+                state=state,
+                size_on_disk=on_disk,
+                detail=detail,
+            )
+        )
+    return infos
+
+
+@app.post("/api/models/{value}/download", response_model=list[ModelInfo])
+def download_model(value: str) -> list[ModelInfo]:
+    if catalog.entry_for(value) is None:
+        raise HTTPException(status_code=404, detail="Unknown model")
+    # Weights run to gigabytes, so the fetch cannot block the request.
+    catalog.TRANSFERS.mark(value, "downloading")
+    threading.Thread(target=_download_model, args=(value,), daemon=True).start()
+    return list_models()
+
+
+@app.delete("/api/models/{value}", response_model=list[ModelInfo])
+def remove_model(value: str) -> list[ModelInfo]:
+    if catalog.entry_for(value) is None:
+        raise HTTPException(status_code=404, detail="Unknown model")
+    try:
+        catalog.remove(value)
+    except Exception as exc:  # noqa: BLE001 - reported rather than raised as a 500
+        raise HTTPException(status_code=500, detail=f"Could not remove model: {exc}") from exc
+    return list_models()
+
+
+def _download_model(value: str) -> None:
+    try:
+        catalog.download(value)
+    except Exception as exc:  # noqa: BLE001 - reported through model state
+        # Belt and braces: catalog.download records the failure itself, but a
+        # transfer left marked "downloading" makes the UI poll forever.
+        catalog.TRANSFERS.mark(value, f"error: {exc}")
+
+
 @app.get("/api/jobs", response_model=list[Job])
-def list_jobs() -> list[Job]:
-    return [_with_audio_url(job) for job in get_store().list_jobs()]
+def list_jobs(collection: JobCollection | None = None) -> list[Job]:
+    jobs = get_store().list_jobs()
+    if collection is not None:
+        jobs = [job for job in jobs if job.collection == collection]
+    return [_with_audio_url(job) for job in jobs]
 
 
 @app.get("/api/jobs/{job_id}", response_model=Job)
@@ -150,6 +224,22 @@ def update_speakers(job_id: str, request: SpeakerRenameRequest) -> Job:
             else:
                 next_speakers.append(speaker)
         return job.model_copy(update={"speakers": next_speakers})
+
+    updated = get_store().mutate(job_id, mutate)
+    if updated is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return _with_audio_url(updated)
+
+
+@app.patch("/api/jobs/{job_id}/collection", response_model=Job)
+def file_job(job_id: str, request: FileJobRequest) -> Job:
+    """Move a job between the inbox, saved conversations, and the archive."""
+
+    def mutate(job: Job) -> Job:
+        update: dict[str, object] = {"collection": request.collection}
+        if request.title is not None:
+            update["title"] = request.title.strip() or None
+        return job.model_copy(update=update)
 
     updated = get_store().mutate(job_id, mutate)
     if updated is None:
@@ -236,7 +326,14 @@ def _run_job(
 
 
 def _with_audio_url(job: Job) -> Job:
-    return job.model_copy(update={"audio_url": f"/api/jobs/{job.id}/audio"})
+    """Shape a stored job for the API: derived fields are added here, not persisted."""
+    return job.model_copy(
+        update={
+            "audio_url": f"/api/jobs/{job.id}/audio",
+            "segments": with_clean_text(job.segments),
+            "speakers": with_voice_ids(job.id, job.speakers),
+        }
+    )
 
 
 def _safe_filename(filename: str) -> str:
@@ -262,9 +359,26 @@ def _save_upload(file: UploadFile, destination: Path, max_upload_mb: int) -> Non
         raise HTTPException(status_code=422, detail="Audio file is empty")
 
 
+def _mount_frontend() -> None:
+    """Serve the built UI from the API when it exists.
+
+    In development vite serves the frontend and proxies /api here. A packaged
+    app has no vite, so the same server has to hand out index.html and the
+    bundle. Mounted last so it never shadows an API route, and skipped entirely
+    when `pnpm build` has not run.
+    """
+    bundle = Path(os.getenv("SPEAKER_SCRIBE_UI", Path(__file__).resolve().parents[2] / "dist"))
+    if (bundle / "index.html").exists():
+        app.mount("/", StaticFiles(directory=bundle, html=True), name="ui")
+
+
 def get_settings() -> AppSettings:
     return app.state.settings
 
 
 def get_store() -> JobStore:
     return app.state.store
+
+
+# Last, so every API route is already registered and cannot be shadowed.
+_mount_frontend()

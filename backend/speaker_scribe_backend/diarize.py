@@ -35,6 +35,29 @@ MIN_WINDOW_SECONDS = 0.6
 # Turns from the same speaker separated by less than this are one turn.
 MERGE_GAP_SECONDS = 0.4
 
+# A turn shorter than this, with the same other speaker on both sides, is
+# treated as a diarization slip rather than a real interjection. Chosen from
+# measured output: on a 43-minute panel the misattributed fragments ran 0.3s to
+# 1.4s, while the shortest genuine turn was around 20s. The cost is that a real
+# one-word backchannel is credited to whoever holds the floor, which reads
+# better than inventing a speaker for it.
+SLIVER_SECONDS = 2.0
+
+# A speaker credited with fewer words than this, and a negligible share of them,
+# is a leftover of clustering rather than a participant.
+#
+# Counted in transcribed words, not seconds of turn. Seconds are the wrong
+# signal: VAD is more permissive than Whisper's word timing, so clustering can
+# hand a phantom a 2.5s turn holding a single word. Judged by duration, a real
+# contributor who says "yeah, that works for me" in a long meeting looks exactly
+# like that phantom and gets folded, putting their words in someone else's mouth.
+# Judged by words it is four against one.
+#
+# The floor is deliberately low. Deleting a real speaker is far worse than
+# leaving a small phantom, so this only catches the unambiguous cases.
+MIN_SPEAKER_WORDS = 3
+MIN_SPEAKER_WORD_SHARE = 0.01
+
 DEFAULT_MAX_SPEAKERS = 8
 
 # Below this silhouette score the embedding cloud has no real cluster structure,
@@ -52,9 +75,15 @@ EMBEDDING_MODEL = "speechbrain/spkrec-ecapa-voxceleb"
 # ECAPA runs one window at a time: measured at ~14 ms/window on CPU, and padding
 # windows into batches was three times slower. Progress is reported every so many
 # windows, spanning this range of the job's progress bar.
+#
+# Diarization owns the tail of the bar, picking up where transcription stops at
+# pipeline.TRANSCRIBE_PROGRESS_END_WITH_DIARIZATION. These stay in step with it.
 EMBEDDING_PROGRESS_EVERY = 64
-EMBEDDING_PROGRESS_START = 0.62
-EMBEDDING_PROGRESS_END = 0.80
+DECODE_PROGRESS = 0.80
+VAD_PROGRESS = 0.82
+EMBEDDING_PROGRESS_START = 0.84
+EMBEDDING_PROGRESS_END = 0.94
+CLUSTERING_PROGRESS = 0.95
 
 
 @dataclass(frozen=True)
@@ -153,7 +182,58 @@ def merge_turns(windows: list[tuple[float, float]], labels: list[int]) -> list[S
             turns[-1] = SpeakerTurn(previous.start, max(previous.end, end), speaker)
         else:
             turns.append(SpeakerTurn(start, end, speaker))
-    return split_overlaps(turns)
+    return split_overlaps(absorb_slivers(turns))
+
+
+def coalesce(turns: list[SpeakerTurn]) -> list[SpeakerTurn]:
+    """Join neighbouring turns that name the same speaker."""
+    joined: list[SpeakerTurn] = []
+    for turn in turns:
+        if joined and joined[-1].speaker == turn.speaker and turn.start <= joined[-1].end + MERGE_GAP_SECONDS:
+            previous = joined[-1]
+            joined[-1] = SpeakerTurn(previous.start, max(previous.end, turn.end), turn.speaker)
+        else:
+            joined.append(turn)
+    return joined
+
+
+def absorb_slivers(turns: list[SpeakerTurn]) -> list[SpeakerTurn]:
+    """Reassign momentary turns that interrupt one continuous speaker.
+
+    Clustering occasionally drops a window or two of a long turn into another
+    speaker, which surfaces as a phantom participant credited with a second of
+    speech. A turn only counts as a slip when the *same* speaker holds the floor
+    on both sides of it, so a genuine short exchange between two people is left
+    alone.
+    """
+    current = list(turns)
+    for _ in range(len(current) or 1):  # bounded: each pass strictly reduces turn count
+        changed = False
+        index = 1
+        while index < len(current) - 1:
+            stop, span = index, 0.0
+            # Gather a run of consecutive brief turns totalling under the threshold,
+            # so two different slivers back to back are handled as one interruption.
+            while stop < len(current) - 1:
+                length = current[stop].end - current[stop].start
+                if length >= SLIVER_SECONDS or span + length >= SLIVER_SECONDS:
+                    break
+                span += length
+                stop += 1
+
+            host = current[index - 1].speaker
+            if stop > index and current[stop].speaker == host and all(
+                turn.speaker != host for turn in current[index:stop]
+            ):
+                for position in range(index, stop):
+                    current[position] = replace(current[position], speaker=host)
+                changed = True
+            index = max(stop, index + 1)
+
+        if not changed:
+            return current
+        current = coalesce(current)
+    return current
 
 
 def split_overlaps(turns: list[SpeakerTurn]) -> list[SpeakerTurn]:
@@ -172,6 +252,47 @@ def split_overlaps(turns: list[SpeakerTurn]) -> list[SpeakerTurn]:
             turns[index] = replace(current, end=boundary)
             turns[index + 1] = replace(following, start=boundary)
     return turns
+
+
+def phantom_speakers(segments: list[dict[str, Any]]) -> set[str]:
+    """Speakers with too little transcribed speech to be participants."""
+    counts: dict[str, int] = defaultdict(int)
+    for segment in segments:
+        words = segment.get("words") or []
+        if words:
+            for word in words:
+                counts[str(word.get("speaker") or speaker_label(0))] += 1
+        else:
+            spoken = str(segment.get("text") or "").split()
+            counts[str(segment.get("speaker") or speaker_label(0))] += len(spoken)
+
+    total = sum(counts.values())
+    if total <= 0 or len(counts) < 2:
+        return set()
+
+    minor = {
+        speaker
+        for speaker, count in counts.items()
+        if count < MIN_SPEAKER_WORDS and count / total < MIN_SPEAKER_WORD_SHARE
+    }
+    # Never fold every voice away; someone has to hold the floor.
+    return set() if len(minor) >= len(counts) else minor
+
+
+def _reassign_phantoms(entries: list[dict[str, Any]], minor: set[str]) -> None:
+    """Rewrite each phantom-owned entry to the nearest real speaker, in place."""
+    real = [
+        index
+        for index, entry in enumerate(entries)
+        if str(entry.get("speaker") or "") not in minor
+    ]
+    if not real:
+        return
+    for index, entry in enumerate(entries):
+        if str(entry.get("speaker") or "") not in minor:
+            continue
+        nearest = min(real, key=lambda position: (abs(position - index), position > index))
+        entry["speaker"] = entries[nearest]["speaker"]
 
 
 def assign_speakers(result: dict[str, Any], turns: list[SpeakerTurn]) -> dict[str, Any]:
@@ -194,6 +315,18 @@ def assign_speakers(result: dict[str, Any], turns: list[SpeakerTurn]) -> dict[st
         else:
             updated["speaker"] = _best_speaker(segment_start, segment_end, turns)
         segments.append(updated)
+
+    # Only now is there enough information to spot a phantom: how much each voice
+    # actually said. Turn geometry alone cannot distinguish a stray window from
+    # someone who spoke briefly.
+    minor = phantom_speakers(segments)
+    if minor:
+        for segment in segments:
+            words = segment.get("words") or []
+            if words:
+                _reassign_phantoms(words, minor)
+                segment["speaker"] = _dominant_speaker(words)
+        _reassign_phantoms(segments, minor)
 
     return {**result, "segments": segments}
 
@@ -246,18 +379,19 @@ class LocalDiarizer:
         options: TranscribeOptions,
         progress: Any,
     ) -> list[SpeakerTurn]:
+        progress(DECODE_PROGRESS, "Decoding audio for speaker analysis")
         waveform = load_audio_16k(audio_path)
 
-        progress(0.55, "Detecting speech regions with Silero VAD")
+        progress(VAD_PROGRESS, "Detecting speech regions with Silero VAD")
         regions = self._speech_regions(waveform)
         windows = speech_windows(regions)
         if not windows:
             return []
 
-        progress(0.62, f"Embedding {len(windows)} speech windows")
+        progress(EMBEDDING_PROGRESS_START, f"Embedding {len(windows)} speech windows")
         embeddings = self._embeddings(waveform, windows, progress)
 
-        progress(0.82, "Clustering speaker embeddings")
+        progress(CLUSTERING_PROGRESS, "Clustering speaker embeddings")
         labels = relabel_by_first_appearance(
             cluster_labels(embeddings, options.min_speakers, options.max_speakers)
         )

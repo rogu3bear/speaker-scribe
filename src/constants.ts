@@ -1,6 +1,9 @@
 import type { TranscribeOptions } from "./types";
 
 export const DEFAULT_TRANSCRIBE_OPTIONS = {
+  // Unchanged deliberately: switching the default would silently change the
+  // quality of your next transcript. Turbo is the better pick for most
+  // interviews — the picker now shows why, so it stays your call.
   model: "large-v3",
   diarize: true,
   min_speakers: undefined,
@@ -8,9 +11,6 @@ export const DEFAULT_TRANSCRIBE_OPTIONS = {
   language: "",
 } satisfies TranscribeOptions;
 
-export const MODEL_OPTIONS = [
-  { label: "large-v3", value: "large-v3" },
-  { label: "large-v3-turbo", value: "large-v3-turbo" },
-  { label: "mlx-community/whisper-large-v3-turbo", value: "mlx-community/whisper-large-v3-turbo" },
-  { label: "mlx-community/whisper-small-mlx", value: "mlx-community/whisper-small-mlx" },
-] as const;
+// Model metadata lives in the backend catalog (GET /api/models), which is the
+// only place that knows what is actually on disk. Keeping a second copy here
+// would guarantee the two drift.

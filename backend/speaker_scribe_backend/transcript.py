@@ -1,11 +1,72 @@
 from __future__ import annotations
 
+import uuid
 from collections import defaultdict
 from collections.abc import Iterable
 from typing import Any
 
+from .cleanup import clean_text
+from .cleanup import is_sentence_end
 from .models import Speaker
 from .models import TranscriptSegment
+
+
+# Fixed namespace so a voice id is reproducible across runs and machines.
+VOICE_NAMESPACE = uuid.UUID("6f9f4b1a-1c4c-4a5e-9f3a-2f7c0d4e8b11")
+
+
+def voice_id(job_id: str, speaker_id: str) -> str:
+    """A durable handle for one voice within one job.
+
+    Derived rather than stored, so it survives re-reads without a migration and
+    cannot drift out of step with the speaker it names.
+    """
+    return uuid.uuid5(VOICE_NAMESPACE, f"{job_id}:{speaker_id}").hex
+
+
+def with_voice_ids(job_id: str, speakers: list[Speaker]) -> list[Speaker]:
+    return [
+        speaker.model_copy(update={"voice_id": voice_id(job_id, speaker.id)})
+        for speaker in speakers
+    ]
+
+
+def build_segment(
+    segment_id: str, start: float, end: float, text: str, speaker: str
+) -> TranscriptSegment:
+    """Build a stored segment. `clean_text` is derived on read, never persisted."""
+    return TranscriptSegment(
+        id=segment_id,
+        start=round(start, 2),
+        end=round(end, 2),
+        text=text,
+        speaker=speaker,
+    )
+
+
+def with_clean_text(segments: list[TranscriptSegment]) -> list[TranscriptSegment]:
+    """Derive the tidied rendering of each segment.
+
+    Cleanup is applied here rather than at transcription time so that improving a
+    rule improves every transcript already on disk, including ones recorded before
+    the rule existed. Storing it instead would freeze each transcript against
+    whatever the rules happened to be the day it was made, and would make tuning
+    them cost a full re-transcription.
+    """
+    derived: list[TranscriptSegment] = []
+    for index, segment in enumerate(segments):
+        previous = segments[index - 1] if index else None
+        continues = (
+            previous is not None
+            and previous.speaker == segment.speaker
+            and not is_sentence_end(previous.text)
+        )
+        derived.append(
+            segment.model_copy(
+                update={"clean_text": clean_text(segment.text, starts_sentence=not continues)}
+            )
+        )
+    return derived
 
 SPEAKER_COLORS = [
     "#0f766e",
@@ -57,13 +118,7 @@ def normalize_transcription_result(result: dict[str, Any]) -> tuple[list[Transcr
         speaker = str(segment.get("speaker") or "SPEAKER_00")
         if text:
             normalized.append(
-                TranscriptSegment(
-                    id=f"seg-{segment_index + 1}",
-                    start=round(start, 2),
-                    end=round(end, 2),
-                    text=text,
-                    speaker=speaker,
-                )
+                build_segment(f"seg-{segment_index + 1}", start, end, text, speaker)
             )
 
     duration = None
@@ -86,12 +141,12 @@ def _segments_from_words(segment_index: int, words: list[dict[str, Any]]) -> lis
             return
         group_index += 1
         grouped.append(
-            TranscriptSegment(
-                id=f"seg-{segment_index + 1}-{group_index}",
-                start=round(current_start, 2),
-                end=round(current_end, 2),
-                text=_join_words(current_words),
-                speaker=current_speaker,
+            build_segment(
+                f"seg-{segment_index + 1}-{group_index}",
+                current_start,
+                current_end,
+                _join_words(current_words),
+                current_speaker,
             )
         )
 

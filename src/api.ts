@@ -1,4 +1,11 @@
-import type { Health, Job, SpeakerRenameRequest, TranscribeOptions } from "./types";
+import type {
+  Health,
+  Job,
+  JobCollection,
+  ModelInfo,
+  SpeakerRenameRequest,
+  TranscribeOptions,
+} from "./types";
 
 const API_BASE = import.meta.env.VITE_API_BASE ?? "";
 
@@ -16,6 +23,21 @@ async function parseJson<T>(response: Response): Promise<T> {
     throw new Error(message);
   }
   return (await response.json()) as T;
+}
+
+export async function fetchModels(): Promise<ModelInfo[]> {
+  const response = await fetch(`${API_BASE}/api/models`);
+  return parseJson<ModelInfo[]>(response);
+}
+
+export async function downloadModel(value: string): Promise<ModelInfo[]> {
+  const response = await fetch(`${API_BASE}/api/models/${value}/download`, { method: "POST" });
+  return parseJson<ModelInfo[]>(response);
+}
+
+export async function removeModel(value: string): Promise<ModelInfo[]> {
+  const response = await fetch(`${API_BASE}/api/models/${value}`, { method: "DELETE" });
+  return parseJson<ModelInfo[]>(response);
 }
 
 export async function fetchHealth(): Promise<Health> {
@@ -64,6 +86,19 @@ export async function renameSpeakers(
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
+  });
+  return parseJson<Job>(response);
+}
+
+export async function fileJob(
+  id: string,
+  collection: JobCollection,
+  title?: string,
+): Promise<Job> {
+  const response = await fetch(`${API_BASE}/api/jobs/${id}/collection`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(title === undefined ? { collection } : { collection, title }),
   });
   return parseJson<Job>(response);
 }

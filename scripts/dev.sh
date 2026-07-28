@@ -15,10 +15,14 @@ trap cleanup EXIT
 # Use SPEAKER_SCRIBE_EXTRA=test with SPEAKER_SCRIBE_ENGINE=mock for the light lane.
 EXTRA="${SPEAKER_SCRIBE_EXTRA:-ml}"
 
+# Watch only the backend package. Watching the whole tree meant a write anywhere
+# under data/ -- a scratch script, an export -- restarted the worker and killed
+# whatever transcript was in flight, which takes minutes on a long recording.
 uv run --extra "$EXTRA" uvicorn speaker_scribe_backend.app:app \
   --app-dir backend \
   --host 127.0.0.1 \
   --port 8118 \
-  --reload &
+  --reload \
+  --reload-dir backend/speaker_scribe_backend &
 
 pnpm dev

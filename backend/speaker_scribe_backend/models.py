@@ -10,6 +10,11 @@ from pydantic import field_validator
 
 JobStatus = Literal["queued", "running", "completed", "failed"]
 
+# Where a job is filed. `inbox` is the working queue; `saved` is the durable
+# conversation history; `archived` is out of the way but recoverable. Filing
+# moves a job rather than copying it, so a transcript has exactly one home.
+JobCollection = Literal["inbox", "saved", "archived"]
+
 
 class TranscribeOptions(BaseModel):
     model: str = "large-v3"
@@ -24,11 +29,19 @@ class TranscriptSegment(BaseModel):
     start: float = Field(ge=0)
     end: float = Field(ge=0)
     text: str
+    # Tidied for reading, derived on read and never persisted: see
+    # transcript.with_clean_text. `text` stays verbatim because that is the record
+    # of what was actually said.
+    clean_text: str = ""
     speaker: str = "SPEAKER_00"
 
 
 class Speaker(BaseModel):
     id: str
+    # Stable, globally unique handle for this voice, derived on read from the job
+    # and the speaker label. Positional labels like SPEAKER_00 collide across
+    # jobs; this does not, so a voice can be addressed and linked to.
+    voice_id: str = ""
     name: str
     color: str
     seconds: float = Field(default=0, ge=0)
@@ -40,6 +53,9 @@ class Job(BaseModel):
     filename: str
     created_at: datetime
     status: JobStatus = "queued"
+    collection: JobCollection = "inbox"
+    # User-chosen name for a saved conversation. Falls back to the file name.
+    title: str | None = None
     progress: float = Field(default=0, ge=0, le=1)
     stage: str = "Queued"
     error: str | None = None
@@ -65,6 +81,23 @@ class Job(BaseModel):
 
 class SpeakerRenameRequest(BaseModel):
     speakers: dict[str, str]
+
+
+class FileJobRequest(BaseModel):
+    collection: JobCollection
+    title: str | None = None
+
+
+class ModelInfo(BaseModel):
+    value: str
+    repo: str
+    label: str
+    hint: str
+    speed: str
+    download_mb: int
+    state: Literal["available", "missing", "downloading", "error"]
+    size_on_disk: int = 0
+    detail: str | None = None
 
 
 class HealthResponse(BaseModel):

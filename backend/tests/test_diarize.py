@@ -3,7 +3,10 @@ import pytest
 from speaker_scribe_backend.diarize import HOP_SECONDS
 from speaker_scribe_backend.diarize import WINDOW_SECONDS
 from speaker_scribe_backend.diarize import SpeakerTurn
+from speaker_scribe_backend.diarize import absorb_slivers
+from speaker_scribe_backend.diarize import phantom_speakers
 from speaker_scribe_backend.diarize import assign_speakers
+from speaker_scribe_backend.diarize import speaker_label
 from speaker_scribe_backend.diarize import cluster_labels
 from speaker_scribe_backend.diarize import merge_turns
 from speaker_scribe_backend.diarize import relabel_by_first_appearance
@@ -65,7 +68,11 @@ def test_merge_turns_collapses_consecutive_same_speaker_windows() -> None:
 
 
 def test_merge_turns_splits_when_the_speaker_changes_back() -> None:
-    turns = merge_turns([(0.0, 1.5), (1.5, 3.0), (3.0, 4.5)], [0, 1, 0])
+    # Each block runs well past SLIVER_SECONDS, so this is a real exchange rather
+    # than a momentary slip.
+    windows = [(0.0, 3.0), (3.0, 6.0), (6.0, 9.0)]
+
+    turns = merge_turns(windows, [0, 1, 0])
 
     assert [turn.speaker for turn in turns] == ["SPEAKER_00", "SPEAKER_01", "SPEAKER_00"]
 
@@ -115,6 +122,164 @@ def test_assign_speakers_does_not_lag_a_speaker_change(  # noqa: D401
     words = assign_speakers(result, turns)["segments"][0]["words"]
 
     assert [word["speaker"] for word in words] == ["SPEAKER_00", "SPEAKER_01"]
+
+
+def turn(start: float, end: float, label: int) -> SpeakerTurn:
+    return SpeakerTurn(start=start, end=end, speaker=speaker_label(label))
+
+
+def test_absorb_slivers_reassigns_a_momentary_interruption() -> None:
+    """A one-second turn inside one speaker's floor is a slip, not a participant."""
+    turns = absorb_slivers([turn(0, 30, 0), turn(30, 30.8, 1), turn(30.8, 60, 0)])
+
+    assert turns == [SpeakerTurn(start=0, end=60, speaker="SPEAKER_00")]
+
+
+def test_absorb_slivers_keeps_a_genuine_short_exchange() -> None:
+    """Different speakers either side means the floor really did change hands."""
+    turns = absorb_slivers([turn(0, 30, 0), turn(30, 31, 1), turn(31, 60, 2)])
+
+    assert [item.speaker for item in turns] == ["SPEAKER_00", "SPEAKER_01", "SPEAKER_02"]
+
+
+def test_absorb_slivers_keeps_a_substantial_turn() -> None:
+    """The audience question that motivated this rule must survive it."""
+    turns = absorb_slivers([turn(0, 30, 0), turn(30, 50, 1), turn(50, 80, 0)])
+
+    assert [item.speaker for item in turns] == ["SPEAKER_00", "SPEAKER_01", "SPEAKER_00"]
+
+
+def test_absorb_slivers_removes_a_phantom_speaker_entirely() -> None:
+    """A voice made only of slivers should not appear in the transcript at all."""
+    turns = absorb_slivers(
+        [
+            turn(0, 20, 0),
+            turn(20, 20.4, 3),
+            turn(20.4, 40, 0),
+            turn(40, 40.6, 3),
+            turn(40.6, 60, 0),
+        ]
+    )
+
+    assert {item.speaker for item in turns} == {"SPEAKER_00"}
+
+
+def test_absorb_slivers_handles_consecutive_slivers() -> None:
+    turns = absorb_slivers(
+        [turn(0, 20, 0), turn(20, 20.5, 1), turn(20.5, 21.2, 2), turn(21.2, 40, 0)]
+    )
+
+    assert {item.speaker for item in turns} == {"SPEAKER_00"}
+
+
+def test_absorb_slivers_leaves_the_edges_alone() -> None:
+    """A short first or last turn has no speaker on both sides, so it stands."""
+    turns = absorb_slivers([turn(0, 0.5, 1), turn(0.5, 30, 0), turn(30, 30.5, 2)])
+
+    assert [item.speaker for item in turns] == ["SPEAKER_01", "SPEAKER_00", "SPEAKER_02"]
+
+
+def test_absorb_slivers_is_a_no_op_on_short_input() -> None:
+    assert absorb_slivers([]) == []
+    assert absorb_slivers([turn(0, 1, 0)]) == [turn(0, 1, 0)]
+    assert absorb_slivers([turn(0, 1, 0), turn(1, 2, 1)]) == [turn(0, 1, 0), turn(1, 2, 1)]
+
+
+def test_merge_turns_drops_a_sliver_end_to_end() -> None:
+    windows = [(0.0, 1.5), (0.75, 2.25), (1.5, 3.0), (2.25, 3.75), (3.0, 4.5), (3.75, 5.25)]
+
+    turns = merge_turns(windows, [0, 0, 0, 1, 0, 0])
+
+    assert {item.speaker for item in turns} == {"SPEAKER_00"}
+
+
+def spoken(speaker: str, text: str) -> dict:
+    return {"speaker": speaker, "text": text}
+
+
+def test_phantom_speakers_flags_a_voice_credited_with_one_stray_word() -> None:
+    segments = [
+        spoken("SPEAKER_00", " ".join(["word"] * 400)),
+        spoken("SPEAKER_03", "each"),
+        spoken("SPEAKER_00", " ".join(["word"] * 400)),
+    ]
+
+    assert phantom_speakers(segments) == {"SPEAKER_03"}
+
+
+def test_phantom_speakers_spares_a_brief_contributor_to_a_long_meeting() -> None:
+    """Thirty-minute standup; a third person says one short sentence.
+
+    Judged by seconds this voice looked identical to a phantom and was folded,
+    putting a real person's words in someone else's mouth.
+    """
+    segments = [
+        spoken("SPEAKER_00", " ".join(["word"] * 2000)),
+        spoken("SPEAKER_02", "Yeah, that works for me"),
+        spoken("SPEAKER_01", " ".join(["word"] * 2000)),
+    ]
+
+    assert phantom_speakers(segments) == set()
+
+
+def test_phantom_speakers_spares_a_co_host_left_small_by_sliver_absorption() -> None:
+    """Backchannels get absorbed first, so only the real question remains."""
+    segments = [
+        spoken("SPEAKER_00", " ".join(["word"] * 1500)),
+        spoken("SPEAKER_02", "How did you get into this line of work"),
+        spoken("SPEAKER_01", " ".join(["word"] * 1500)),
+    ]
+
+    assert phantom_speakers(segments) == set()
+
+
+def test_phantom_speakers_never_flags_every_voice() -> None:
+    segments = [spoken("SPEAKER_00", "hi"), spoken("SPEAKER_01", "yo")]
+
+    assert phantom_speakers(segments) == set()
+
+
+def test_phantom_speakers_ignores_a_lone_speaker() -> None:
+    assert phantom_speakers([spoken("SPEAKER_00", "a")]) == set()
+    assert phantom_speakers([]) == set()
+
+
+def test_assign_speakers_folds_a_phantom_into_the_surrounding_voice() -> None:
+    turns = [
+        SpeakerTurn(start=0.0, end=400.0, speaker="SPEAKER_00"),
+        SpeakerTurn(start=400.0, end=402.5, speaker="SPEAKER_03"),
+        SpeakerTurn(start=402.5, end=800.0, speaker="SPEAKER_00"),
+    ]
+    result = {
+        "segments": [
+            {"start": 0.0, "end": 400.0, "text": " ".join(["word"] * 400)},
+            {"start": 400.5, "end": 400.9, "text": "each"},
+            {"start": 402.5, "end": 800.0, "text": " ".join(["word"] * 400)},
+        ]
+    }
+
+    assigned = assign_speakers(result, turns)
+
+    assert {segment["speaker"] for segment in assigned["segments"]} == {"SPEAKER_00"}
+
+
+def test_assign_speakers_keeps_a_real_brief_speaker() -> None:
+    turns = [
+        SpeakerTurn(start=0.0, end=400.0, speaker="SPEAKER_00"),
+        SpeakerTurn(start=400.0, end=404.0, speaker="SPEAKER_02"),
+        SpeakerTurn(start=404.0, end=800.0, speaker="SPEAKER_01"),
+    ]
+    result = {
+        "segments": [
+            {"start": 0.0, "end": 400.0, "text": " ".join(["word"] * 400)},
+            {"start": 400.0, "end": 404.0, "text": "Yeah, that works for me"},
+            {"start": 404.0, "end": 800.0, "text": " ".join(["word"] * 400)},
+        ]
+    }
+
+    assigned = assign_speakers(result, turns)
+
+    assert assigned["segments"][1]["speaker"] == "SPEAKER_02"
 
 
 def test_assign_speakers_maps_words_by_maximum_overlap() -> None:
