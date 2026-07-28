@@ -2,6 +2,12 @@
 
 Speaker Scribe is a local-first web app for turning audio files into transcripts with speaker turns. It uses an Apple Silicon-friendly stack: `mlx-whisper` for Whisper transcription through MLX, and a fully local diarizer built from Silero VAD, SpeechBrain ECAPA speaker embeddings, and clustering. No account, API key, or hosted service is involved.
 
+![Speaker Scribe: pooled speaker turns, a tidy-text toggle, per-voice statistics, and the model cache](docs/demo.gif)
+
+*Real screenshots of the running app. The conversation is invented — three
+fictional people discussing an onboarding flow — because a demo should not ship
+somebody's actual recording. Rebuild it with `./scripts/record-demo.sh`.*
+
 ## What It Does
 
 - Upload WAV, MP3, M4A, FLAC, or AAC audio files.
