@@ -11,9 +11,12 @@ can still import and serve the API.
 
 from __future__ import annotations
 
+import os
+import shutil
 import threading
 from dataclasses import dataclass
 from dataclasses import field
+from pathlib import Path
 from typing import Literal
 
 ModelState = Literal["available", "missing", "downloading", "error"]
@@ -85,6 +88,96 @@ CATALOG: tuple[CatalogEntry, ...] = (
 # Speaker embedding model. Listed so the cache view accounts for everything the
 # app pulls down, but it is required for diarization and so is not removable.
 EMBEDDING_REPO = "speechbrain/spkrec-ecapa-voxceleb"
+
+# The packaged app ships some weights inside itself so that a first run works
+# with no network. This names the directory they sit in; it is unset everywhere
+# else, and seeding is then a no-op.
+BUNDLED_MODELS_ENV = "SPEAKER_SCRIBE_BUNDLED_MODELS"
+
+
+def bundled_models_dir() -> Path | None:
+    """The read-only cache shipped inside the app, when there is one."""
+    raw = os.getenv(BUNDLED_MODELS_ENV)
+    if not raw:
+        return None
+    path = Path(raw)
+    return path if path.is_dir() else None
+
+
+def _copy_into(source: Path, destination: Path) -> bool:
+    """Copy one model directory across, or report that it could not be done.
+
+    Staged under a temporary name and moved into place, so an interrupted copy
+    cannot leave behind something that looks like a complete model.
+    """
+    if destination.exists():
+        return False
+
+    staging = destination.parent / f".{destination.name}.incoming"
+    try:
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        if staging.exists():
+            shutil.rmtree(staging)
+        # symlinks=True matters for the hub cache, which stores every file once
+        # as a blob and links the snapshot at it. Resolving those would duplicate
+        # the weights and roughly double the space the app occupies.
+        shutil.copytree(source, staging, symlinks=True)
+        staging.rename(destination)
+    except OSError:
+        shutil.rmtree(staging, ignore_errors=True)
+        return False
+    return True
+
+
+def seed_bundled_models() -> list[str]:
+    """Copy shipped weights into the real caches. Returns what was copied.
+
+    The bundle is read-only and gets replaced wholesale on update, so it cannot
+    be the cache itself: downloading a second model has to work, and a model the
+    user deletes has to stay deleted. Copying once into the writable cache gives
+    both, and makes a bundled model indistinguishable from a downloaded one
+    everywhere else in this module.
+
+    Two destinations, because the two kinds of weight are cached differently.
+    Whisper models are Hugging Face repos and belong in the hub cache; the
+    speaker embedding model is loaded by SpeechBrain from a plain directory.
+    The bundle mirrors that split:
+
+        models/hub/models--mlx-community--whisper-small-mlx
+        models/speechbrain/spkrec-ecapa-voxceleb
+
+    Only ever adds. An existing directory is left alone even if it is a partial
+    download, because overwriting the live cache underneath a running app is a
+    worse failure than a re-download the user can trigger themselves.
+    """
+    from .diarize import model_cache_dir
+
+    source = bundled_models_dir()
+    if source is None:
+        return []
+
+    seeded: list[str] = []
+
+    hub_source = source / "hub"
+    if hub_source.is_dir():
+        try:
+            from huggingface_hub.constants import HF_HUB_CACHE
+        except ImportError:
+            HF_HUB_CACHE = None  # noqa: N806 - mirrors the upstream constant name
+        if HF_HUB_CACHE:
+            hub_cache = Path(HF_HUB_CACHE)
+            for entry in sorted(hub_source.glob("models--*")):
+                if entry.is_dir() and _copy_into(entry, hub_cache / entry.name):
+                    seeded.append(entry.name)
+
+    speechbrain_source = source / "speechbrain"
+    if speechbrain_source.is_dir():
+        savedir = model_cache_dir()
+        for entry in sorted(p for p in speechbrain_source.iterdir() if p.is_dir()):
+            if _copy_into(entry, savedir / entry.name):
+                seeded.append(f"speechbrain/{entry.name}")
+
+    return seeded
 
 
 @dataclass

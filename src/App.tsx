@@ -13,11 +13,13 @@ import {
   uploadAudio,
 } from "./api";
 import { JobList } from "./components/JobList";
+import { LegalPanel } from "./components/LegalPanel";
+import type { LegalDocument } from "./components/LegalPanel";
 import { SpeakerPanel } from "./components/SpeakerPanel";
 import { TranscriptWorkspace } from "./components/TranscriptWorkspace";
 import { UploadPanel } from "./components/UploadPanel";
 import { DEFAULT_TRANSCRIBE_OPTIONS } from "./constants";
-import { canPollJob } from "./lib/presentation";
+import { canPollJob, preferredModel } from "./lib/presentation";
 import type { Health, Job, JobCollection, ModelInfo, Speaker, TranscribeOptions } from "./types";
 
 function App() {
@@ -31,6 +33,8 @@ function App() {
   const [collection, setCollection] = useState<JobCollection>("inbox");
   const [models, setModels] = useState<ModelInfo[]>([]);
   const [busyModel, setBusyModel] = useState<string | null>(null);
+  const [modelSettled, setModelSettled] = useState(false);
+  const [legal, setLegal] = useState<LegalDocument | null>(null);
 
   const activeJob = jobs.find((job) => job.id === activeJobId) ?? null;
 
@@ -68,6 +72,23 @@ function App() {
   useEffect(() => {
     void refreshModels();
   }, []);
+
+  // Settle on a model that is actually on disk, once, when the catalog first
+  // arrives. Only then is it known what this machine has: a fresh install of the
+  // packaged app has just the shipped model, and a long-running one may have
+  // every model. After this the choice belongs to the user, so it never runs
+  // again — including when a download finishes, which would otherwise move the
+  // picker underneath them.
+  useEffect(() => {
+    if (modelSettled || models.length === 0) {
+      return;
+    }
+    const preferred = preferredModel(models);
+    if (preferred) {
+      setOptions((current) => ({ ...current, model: preferred }));
+    }
+    setModelSettled(true);
+  }, [models, modelSettled]);
 
   // A download runs on a worker thread, so poll while one is in flight.
   useEffect(() => {
@@ -245,10 +266,22 @@ function App() {
           onFileJob={(job, next) => void moveJob(job, next)}
           onRefresh={() => void refreshJobs()}
         />
+
+        <footer className="sidebar-footer">
+          <span>Audio stays on this Mac.</span>
+          <button type="button" className="link-button" onClick={() => setLegal("privacy")}>
+            Privacy
+          </button>
+          <button type="button" className="link-button" onClick={() => setLegal("terms")}>
+            Terms
+          </button>
+        </footer>
       </aside>
 
       <TranscriptWorkspace job={activeJob} />
       <SpeakerPanel job={activeJob} onRenameSpeaker={updateSpeakerName} />
+
+      {legal ? <LegalPanel document={legal} onClose={() => setLegal(null)} /> : null}
     </main>
   );
 }

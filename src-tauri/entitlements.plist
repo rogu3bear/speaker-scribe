@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Entitlements for the notarized build.
+
+  The hardened runtime is required for notarization, and its defaults assume an
+  app whose executable code is fixed at build time. This one embeds a Python
+  interpreter and a Metal-backed inference stack, so three of those defaults have
+  to be relaxed. Each is listed with the thing that needs it; nothing here is
+  precautionary.
+-->
+<plist version="1.0">
+  <dict>
+    <!-- MLX compiles Metal shaders at runtime, and numba JIT-compiles the audio
+         resampling paths in the Whisper frontend. Both write executable pages. -->
+    <key>com.apple.security.cs.allow-jit</key>
+    <true/>
+    <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+    <true/>
+
+    <!-- Python loads its extension modules as dylibs out of site-packages. Under
+         library validation the runtime will only load libraries signed by this
+         same team, and wheels from PyPI are not. The alternative, re-signing
+         several hundred vendored dylibs and hoping none is missed, is a worse
+         guarantee than stating the requirement plainly. -->
+    <key>com.apple.security.cs.disable-library-validation</key>
+    <true/>
+  </dict>
+</plist>

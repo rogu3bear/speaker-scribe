@@ -59,10 +59,13 @@ async def lifespan(api: FastAPI) -> AsyncIterator[None]:
     # this module — as any pytest run from the repository root does — cannot
     # rewrite a store that another process is actively working on.
     api.state.store.fail_interrupted_jobs()
+    # A packaged app ships weights inside itself; move them into the writable
+    # cache so the first run works with no network. A no-op everywhere else.
+    catalog.seed_bundled_models()
     yield
 
 
-app = FastAPI(title="Speaker Scribe API", version="0.1.0", lifespan=lifespan)
+app = FastAPI(title="Speaker Scribe API", version="0.2.0", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://127.0.0.1:5178", "http://localhost:5178"],
@@ -84,6 +87,35 @@ def health() -> HealthResponse:
         ml_ready=ready,
         detail=detail,
     )
+
+
+# Shipped with the app so they are readable offline, and served from the same
+# files the repository publishes rather than a second copy in the frontend.
+LEGAL_DOCUMENTS = ("terms", "privacy")
+
+
+def legal_dir() -> Path:
+    raw = os.getenv("SPEAKER_SCRIBE_LEGAL")
+    if raw:
+        return Path(raw)
+    return Path(__file__).resolve().parents[2] / "docs" / "legal"
+
+
+@app.get("/api/legal/{name}")
+def legal(name: str) -> Response:
+    """Return one legal document as markdown.
+
+    `name` is checked against the allowlist rather than sanitised, because the
+    set is fixed and two known filenames cannot be talked into path traversal.
+    """
+    if name not in LEGAL_DOCUMENTS:
+        raise HTTPException(status_code=404, detail=f"No document named {name!r}")
+
+    path = legal_dir() / f"{name}.md"
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail=f"{name} is not available in this build")
+
+    return Response(content=path.read_text(encoding="utf-8"), media_type="text/markdown")
 
 
 @app.get("/api/models", response_model=list[ModelInfo])

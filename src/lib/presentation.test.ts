@@ -1,7 +1,13 @@
 import { describe, expect, it } from "vitest";
-import type { TranscriptSegment } from "../types";
+import type { ModelInfo, TranscriptSegment } from "../types";
 import type { Job } from "../types";
-import { groupSegmentsBySpeaker, jobTitle, jobsInCollection, turnText } from "./presentation";
+import {
+  groupSegmentsBySpeaker,
+  jobTitle,
+  jobsInCollection,
+  preferredModel,
+  turnText,
+} from "./presentation";
 
 function job(id: string, fields: Partial<Job> = {}): Job {
   return {
@@ -175,5 +181,51 @@ describe("turnText", () => {
     ])[0];
 
     expect(turnText(withFiller, true)).toBe("real content more content");
+  });
+});
+
+describe("preferredModel", () => {
+  function model(value: string, state: ModelInfo["state"]): ModelInfo {
+    return {
+      value,
+      repo: `mlx-community/whisper-${value}`,
+      label: value,
+      hint: "",
+      speed: "",
+      download_mb: 100,
+      state,
+      size_on_disk: state === "available" ? 100 : 0,
+    };
+  }
+
+  // The catalog arrives worst-first, so "best available" is the last one.
+  it("picks the most accurate model already on disk", () => {
+    const catalog = [
+      model("tiny", "available"),
+      model("small", "available"),
+      model("large-v3", "missing"),
+    ];
+
+    expect(preferredModel(catalog)).toBe("small");
+  });
+
+  it("ignores models that are only part-way through downloading", () => {
+    const catalog = [model("small", "available"), model("large-v3", "downloading")];
+
+    expect(preferredModel(catalog)).toBe("small");
+  });
+
+  it("ignores a model that failed to download", () => {
+    const catalog = [model("small", "available"), model("large-v3", "error")];
+
+    expect(preferredModel(catalog)).toBe("small");
+  });
+
+  it("has no answer when nothing is downloaded yet", () => {
+    expect(preferredModel([model("tiny", "missing")])).toBeUndefined();
+  });
+
+  it("has no answer before the catalog has loaded", () => {
+    expect(preferredModel([])).toBeUndefined();
   });
 });

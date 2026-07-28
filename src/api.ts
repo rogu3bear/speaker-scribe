@@ -106,3 +106,12 @@ export async function fileJob(
 export function exportUrl(id: string, format: "txt" | "srt" | "json"): string {
   return `${API_BASE}/api/jobs/${id}/export?format=${format}`;
 }
+
+/** One legal document, as markdown. Served from the copy shipped with the app. */
+export async function fetchLegal(name: "terms" | "privacy"): Promise<string> {
+  const response = await fetch(`${API_BASE}/api/legal/${name}`);
+  if (!response.ok) {
+    throw new Error(`${response.status} ${response.statusText}`);
+  }
+  return response.text();
+}
