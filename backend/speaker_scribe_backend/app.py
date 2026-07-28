@@ -65,7 +65,7 @@ async def lifespan(api: FastAPI) -> AsyncIterator[None]:
     yield
 
 
-app = FastAPI(title="Speaker Scribe API", version="0.1.0", lifespan=lifespan)
+app = FastAPI(title="Speaker Scribe API", version="0.2.0", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://127.0.0.1:5178", "http://localhost:5178"],
