@@ -188,7 +188,18 @@ echo "==> Checking the app did not modify itself"
 # `codesign -dv` always prints and sets to "not set" for an ad-hoc signature;
 # Authority only appears at higher verbosity, so testing for it silently skipped
 # every bundle including the signed ones.
-if codesign -dv "$APP" 2>&1 | grep -q 'TeamIdentifier=[A-Z0-9]'; then
+#
+# Read into a variable rather than piped into `grep -q`: under `set -o pipefail`
+# grep -q closes the pipe as soon as it matches, codesign dies of SIGPIPE, and
+# the pipeline exits 141 — reporting a match as a failure, intermittently,
+# depending on how codesign flushes.
+SIGNATURE="$(codesign -dv "$APP" 2>&1 || true)"
+case "$SIGNATURE" in
+  *TeamIdentifier=[A-Z0-9]*) SIGNED=yes ;;
+  *) SIGNED=no ;;
+esac
+
+if [ "$SIGNED" = yes ]; then
   if ! codesign --verify --deep --strict "$APP" 2>/dev/null; then
     echo "Running the app changed its own contents:" >&2
     codesign --verify --deep --strict "$APP" 2>&1 | head -5 >&2

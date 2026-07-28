@@ -27,11 +27,21 @@ DMG="$BUNDLE/dmg/Speaker Scribe_${VERSION}_aarch64.dmg"
 }
 
 # Notarizing an unsigned build wastes twenty minutes to be told it is unsigned.
-codesign -dv "$APP" 2>&1 | grep -q 'TeamIdentifier=[A-Z0-9]' || {
-  echo "$APP is not Developer ID signed." >&2
-  echo "Rebuild with SIGN_IDENTITY set; see docs/packaging.md." >&2
-  exit 1
-}
+#
+# Read into a variable rather than piped into `grep -q`. Under `set -o pipefail`
+# that pipeline reports the failure of whichever side exits non-zero, and grep -q
+# closes the pipe the instant it matches, so codesign dies of SIGPIPE and the
+# pipeline exits 141 — a successful match reported as a failure. Whether it
+# happens at all depends on how codesign flushes, which makes it intermittent.
+SIGNATURE="$(codesign -dv "$APP" 2>&1 || true)"
+case "$SIGNATURE" in
+  *TeamIdentifier=[A-Z0-9]*) ;;
+  *)
+    echo "$APP is not Developer ID signed." >&2
+    echo "Rebuild with SIGN_IDENTITY set; see docs/packaging.md." >&2
+    exit 1
+    ;;
+esac
 
 echo "==> Submitting $(basename "$DMG") ($(du -h "$DMG" | cut -f1))"
 xcrun notarytool submit "$DMG" --keychain-profile "$PROFILE" --wait
