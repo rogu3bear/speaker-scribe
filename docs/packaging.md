@@ -107,6 +107,20 @@ The offline flag is the point. Without it the script passes on any machine with 
 warm model cache and a network connection, which is exactly the case it needs to
 tell apart from a working install.
 
+It also re-checks the signature after running, because the app used to break it.
+Python caches bytecode next to every module it imports, so the first launch wrote
+2810 `.pyc` files into a signed bundle and invalidated its own seal. Nothing
+visibly failed: an app that has already cleared Gatekeeper is not re-assessed, so
+it kept working on the machine it was installed on, while `codesign --verify`
+failed from that point and a copy taken anywhere else was refused.
+
+The fix is in two halves. `build-app.sh` compiles the bytecode into the bundle
+before signing, using `--invalidation-mode unchecked-hash` — copying the tree
+rewrites every source mtime, so timestamp-validated bytecode would look stale and
+be rewritten on first import, which is the thing being prevented. And the app
+runs the server with `PYTHONDONTWRITEBYTECODE=1`, so nothing writes into the
+bundle even if something is missed.
+
 ## Signing
 
 Ad-hoc signing (the default) is enough to run the app on the machine that built

@@ -25,6 +25,7 @@
       "../build/models": "models",
       "../build/ffmpeg/bin/ffmpeg": "ffmpeg",
       "../backend/speaker_scribe_backend": "backend/speaker_scribe_backend",
+      "../docs/legal": "legal",
       "../dist": "dist"
     },
     "macOS": {

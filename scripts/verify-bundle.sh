@@ -26,7 +26,7 @@ LOG="$ROOT/build/bundle-smoke.log"
 }
 
 for required in runtime/bin/python3 ffmpeg backend/speaker_scribe_backend dist/index.html \
-  models/hub models/speechbrain/spkrec-ecapa-voxceleb; do
+  models/hub models/speechbrain/spkrec-ecapa-voxceleb legal/terms.md legal/privacy.md; do
   [ -e "$RESOURCES/$required" ] || {
     echo "Bundle is missing $required" >&2
     exit 1
@@ -57,9 +57,11 @@ SPEAKER_SCRIBE_DATA="$DATA" \
   SPEAKER_SCRIBE_UI="$RESOURCES/dist" \
   SPEAKER_SCRIBE_FFMPEG="$RESOURCES/ffmpeg" \
   SPEAKER_SCRIBE_BUNDLED_MODELS="$RESOURCES/models" \
+  SPEAKER_SCRIBE_LEGAL="$RESOURCES/legal" \
   HF_HOME="$DATA/models" \
   SPEAKER_SCRIBE_MODEL_CACHE="$DATA/model-cache" \
   HF_HUB_OFFLINE=1 \
+  PYTHONDONTWRITEBYTECODE=1 \
   PATH="$RESOURCES:$PATH" \
   "$RESOURCES/runtime/bin/python3" -m uvicorn speaker_scribe_backend.app:app \
   --app-dir "$RESOURCES/backend" --host 127.0.0.1 --port "$PORT" \
@@ -113,6 +115,15 @@ case "$MODELS" in
 esac
 echo "    small: available"
 
+echo "==> Checking the legal documents are readable offline"
+for name in terms privacy; do
+  curl -fsS --max-time 5 "http://127.0.0.1:$PORT/api/legal/$name" | head -1 | grep -q '^# ' || {
+    echo "The $name document was not served from the bundle." >&2
+    exit 1
+  }
+done
+echo "    terms and privacy"
+
 AUDIO="${VERIFY_AUDIO:-$ROOT/data/fixtures/_probe_short.wav}"
 if [ ! -f "$AUDIO" ]; then
   echo
@@ -164,6 +175,29 @@ case "$STATE" in
     exit 1
     ;;
 esac
+
+echo "==> Checking the app did not modify itself"
+# This script wrote 2810 bytecode files into a signed bundle the first time it
+# ran, because Python caches bytecode beside every module it imports. A signed
+# bundle that writes to itself invalidates its own seal, and the app would have
+# done the same on a user's machine. Checking afterwards is what makes that
+# visible; checking only before ran for a whole release cycle without noticing.
+#
+# Ad-hoc signed bundles are skipped: they are the local build, and re-verifying
+# one says nothing about what ships. Detected through TeamIdentifier, which
+# `codesign -dv` always prints and sets to "not set" for an ad-hoc signature;
+# Authority only appears at higher verbosity, so testing for it silently skipped
+# every bundle including the signed ones.
+if codesign -dv "$APP" 2>&1 | grep -q 'TeamIdentifier=[A-Z0-9]'; then
+  if ! codesign --verify --deep --strict "$APP" 2>/dev/null; then
+    echo "Running the app changed its own contents:" >&2
+    codesign --verify --deep --strict "$APP" 2>&1 | head -5 >&2
+    exit 1
+  fi
+  echo "    signature intact"
+else
+  echo "    not Developer ID signed, nothing to check"
+fi
 
 echo
 echo "Bundle verified offline: $APP"

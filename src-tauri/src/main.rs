@@ -91,6 +91,13 @@ impl Runtime {
                     .env("HF_HOME", data_dir.join("models"))
                     .env("SPEAKER_SCRIBE_MODEL_CACHE", data_dir.join("model-cache"))
                     .env("SPEAKER_SCRIBE_BUNDLED_MODELS", resources.join("models"))
+                    .env("SPEAKER_SCRIBE_LEGAL", resources.join("legal"))
+                    // The bundle is signed, and a signed bundle that writes to
+                    // itself invalidates its own seal. Python caches bytecode
+                    // next to every module it imports, so without this the app
+                    // breaks its signature the first time it runs. The bytecode
+                    // is compiled into the bundle at build time instead.
+                    .env("PYTHONDONTWRITEBYTECODE", "1")
                     // mlx-whisper shells out to ffmpeg by name, so the bundled
                     // one has to be findable as a plain `ffmpeg` too.
                     .env("PATH", bundled_path(resources));

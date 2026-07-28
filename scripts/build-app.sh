@@ -72,6 +72,29 @@ cp -RP "$ROOT/build/models" "$APP/Contents/Resources/models"
 AFTER="$(du -sk "$APP/Contents/Resources/models" | cut -f1)"
 echo "    $((BEFORE / 1024)) MB -> $((AFTER / 1024)) MB"
 
+# Compile the bytecode now, while the bundle can still be written to.
+#
+# Otherwise Python writes it on first run, inside a bundle that by then is
+# signed, and the app invalidates its own seal simply by starting. It keeps
+# working, because nothing re-checks the seal on an app that has already cleared
+# Gatekeeper, but `codesign --verify` fails from that moment on and a copy taken
+# to another machine is refused.
+#
+# unchecked-hash rather than the default timestamp check: copying the tree into
+# the bundle rewrote every source file's mtime, so timestamp-validated bytecode
+# would all look stale and be recompiled — and rewritten — on first import,
+# which is the thing being prevented. The sources cannot change after this
+# point, so there is nothing for the check to catch.
+#
+# Runs before signing, because signing has to seal what this produces.
+echo "==> Compiling bytecode into the bundle"
+"$APP/Contents/Resources/runtime/bin/python3" -m compileall -q -f \
+  --invalidation-mode unchecked-hash \
+  "$APP/Contents/Resources/runtime/lib/python3.12" \
+  "$APP/Contents/Resources/backend" >/dev/null 2>&1 || true
+PYC="$(find "$APP/Contents/Resources" -name '*.pyc' -type f | wc -l | tr -d ' ')"
+echo "    $PYC files"
+
 if [ -n "${SIGN_IDENTITY:-}" ]; then
   echo "==> Signing as: ${SIGN_IDENTITY}"
   # Inside-out, and every Mach-O file rather than just the executable: the

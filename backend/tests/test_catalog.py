@@ -134,6 +134,39 @@ def test_remove_reports_a_failure_rather_than_a_bare_500(monkeypatch, tmp_path: 
     assert "read-only file system" in response.json()["detail"]
 
 
+# --- Terms and privacy -----------------------------------------------------
+
+
+def test_the_shipped_legal_documents_are_served(tmp_path: Path) -> None:
+    """These are read from disk, so a packaging mistake makes them 404."""
+    for name in ("terms", "privacy"):
+        response = client_over(tmp_path).get(f"/api/legal/{name}")
+
+        assert response.status_code == 200, name
+        assert response.text.startswith("#"), name
+
+
+def test_an_unknown_document_is_a_404(tmp_path: Path) -> None:
+    assert client_over(tmp_path).get("/api/legal/refund").status_code == 404
+
+
+def test_the_document_name_cannot_escape_the_directory(tmp_path: Path) -> None:
+    """The name comes from the URL, so the allowlist is the only thing guarding it."""
+    for attempt in ("../../pyproject", "..%2f..%2fpyproject", "terms/../../../etc/passwd"):
+        response = client_over(tmp_path).get(f"/api/legal/{attempt}")
+
+        assert response.status_code == 404, attempt
+
+
+def test_a_build_missing_its_documents_says_so(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("SPEAKER_SCRIBE_LEGAL", str(tmp_path / "absent"))
+
+    response = client_over(tmp_path).get("/api/legal/terms")
+
+    assert response.status_code == 404
+    assert "not available" in response.json()["detail"]
+
+
 # --- Weights shipped inside the packaged app -------------------------------
 #
 # The bundle is read-only and is replaced wholesale on update, so it cannot be
