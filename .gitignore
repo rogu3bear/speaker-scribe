@@ -12,6 +12,9 @@ dist
 dist-ssr
 build
 *.iconset
+src-tauri/target
+src-tauri/gen
+src-tauri/var
 *.local
 data/
 .venv/

@@ -1,0 +1,27 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Speaker Scribe",
+  "version": "0.1.0",
+  "identifier": "com.mlnavigator.speaker-scribe",
+  "build": {
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["app", "dmg"],
+    "icon": ["icons/icon.icns"],
+    "copyright": "MIT licensed. Audio never leaves this machine.",
+    "category": "Productivity",
+    "shortDescription": "Local transcription with speaker turns",
+    "longDescription": "Turns audio files into transcripts with speaker turns, entirely on this machine. No account, no API key, no upload.",
+    "macOS": {
+      "minimumSystemVersion": "13.0"
+    }
+  }
+}

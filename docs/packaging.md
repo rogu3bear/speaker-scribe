@@ -1,29 +1,41 @@
 # Packaging Speaker Scribe as a macOS app
 
 ```bash
-./scripts/build-app.sh          # build/Speaker Scribe.app, ad-hoc signed
+./scripts/build-app.sh
 ```
 
-Double-clicking the result starts the local API, waits for it to answer, and
-opens the UI in the default browser. The API serves the built frontend itself,
-so no vite dev server is involved. Logs go to `~/Library/Logs/SpeakerScribe.log`.
+Produces `src-tauri/target/release/bundle/macos/Speaker Scribe.app` and a DMG
+beside it. Around 4 MB and 1.5 MB respectively, because Tauri uses the system
+WebView rather than shipping a browser.
 
-Regenerate the icon with `uv run --extra ml python scripts/make-icon.py`. It is
-drawn from the same brand values as the UI rather than committed as an opaque
-binary.
+The app opens a native window, not a browser tab. On launch it starts the local
+API, waits for it to answer, points the window at it, and stops the server again
+when the window closes — unless a server was already running, in which case it
+attaches to that one and leaves it alone. The API serves the built frontend
+itself, so vite is only involved in development.
+
+Building needs a Rust toolchain (`rustup`). Running the built app does not.
+
+Regenerate the icon with `uv run --extra ml python scripts/make-icon.py`, then
+`./node_modules/.bin/tauri icon assets/AppIcon-1024.png` to refresh the platform
+sizes. It is drawn from the same brand values as the UI rather than committed as
+an opaque binary.
+
+`scripts/app-launcher.sh` is the previous shell-based launcher, kept only as a
+fallback for a machine with no Rust toolchain. It opens the default browser
+instead of a window.
 
 ## What the bundle is, and is not
 
-It is a **launcher**, not a self-contained application. It records the path of
-the checkout it was built from and runs that. Move or delete the checkout and
-the app reports the problem and exits.
+The window and the server are packaged; **the Python environment is not**. The
+app records the path of the checkout it was built from and runs that. Move or
+delete the checkout and it reports the problem rather than failing obscurely.
 
-This is deliberate. A genuinely portable bundle has to solve three problems that
-a launcher sidesteps:
+This is deliberate. Vendoring the backend has to solve three problems:
 
 - **Size.** The speech stack is several gigabytes before any model weights, and
-  the weights are several more. A self-contained app would be a very large
-  download for a tool most people run on one machine.
+  the weights are several more. The shell is 4 MB; the environment behind it is
+  roughly a thousand times that.
 - **ffmpeg licensing.** Audio decoding shells out to `ffmpeg`, and the common
   builds are GPL. Speaker Scribe is MIT. Shipping a GPL binary inside an MIT
   application in one bundle is a licensing decision, not a packaging detail.
@@ -43,12 +55,12 @@ it. Gatekeeper will refuse it anywhere else.
 To sign properly:
 
 ```bash
-SIGN_IDENTITY="Developer ID Application: YOUR NAME (TEAMID)" ./scripts/build-app.sh
 security find-identity -v -p codesigning    # list available identities
+SIGN_IDENTITY="Developer ID Application: YOUR NAME (TEAMID)" ./scripts/build-app.sh
 ```
 
-The build already passes `--options runtime --timestamp`, both of which
-notarization requires.
+The script sets `APPLE_SIGNING_IDENTITY` and enables the hardened runtime, both
+of which notarization requires.
 
 ## Notarization
 
@@ -72,10 +84,12 @@ xcrun notarytool store-credentials speaker-scribe \
 
 # Per release
 SIGN_IDENTITY="Developer ID Application: YOUR NAME (TEAMID)" ./scripts/build-app.sh
-ditto -c -k --keepParent "build/Speaker Scribe.app" build/SpeakerScribe.zip
-xcrun notarytool submit build/SpeakerScribe.zip --keychain-profile speaker-scribe --wait
-xcrun stapler staple "build/Speaker Scribe.app"
-spctl --assess --type execute -vv "build/Speaker Scribe.app"
+
+BUNDLE=src-tauri/target/release/bundle
+xcrun notarytool submit "$BUNDLE"/dmg/*.dmg --keychain-profile speaker-scribe --wait
+xcrun stapler staple "$BUNDLE"/dmg/*.dmg
+xcrun stapler staple "$BUNDLE/macos/Speaker Scribe.app"
+spctl --assess --type execute -vv "$BUNDLE/macos/Speaker Scribe.app"
 ```
 
 `--wait` blocks until Apple returns a verdict. On rejection,
