@@ -1,0 +1,16 @@
+name = "speaker-scribe-web"
+main = "build/_worker.js"
+compatibility_date = "2026-04-22"
+upload_source_maps = true
+
+[build]
+command = "bash ./scripts/build-edge.sh"
+
+[assets]
+directory = "./target/site"
+binding = "ASSETS"
+
+# No D1 binding, and no other storage. The site renders the same pages for
+# everybody and keeps nothing, so there is nothing to store. The template this
+# came from provisions a database for its demo; adding one back here would mean
+# a website about a tool that stores nothing quietly storing something.

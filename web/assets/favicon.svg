@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="Speaker Scribe">
+  <!-- The app's teal, with two bars reading as a waveform. Drawn rather than
+       exported so it stays in step with the palette in style/main.css. -->
+  <circle cx="16" cy="16" r="16" fill="#0f766e"/>
+  <rect x="13" y="9" width="3" height="14" rx="1.5" fill="#f6f7f4"/>
+  <rect x="19" y="12" width="3" height="8" rx="1.5" fill="#f6f7f4"/>
+</svg>

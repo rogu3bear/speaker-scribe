@@ -1,0 +1,9 @@
+# getrandom has no default source of randomness on wasm32-unknown-unknown: the
+# target has no OS, so the crate refuses to guess and fails to compile until it
+# is told which backend to use. On a Worker that is the JavaScript one.
+#
+# Needed even though this site generates no randomness itself — it arrives
+# through the dependency tree, and the error names getrandom's internals rather
+# than anything in this crate.
+[target.wasm32-unknown-unknown]
+rustflags = ["--cfg", "getrandom_backend=\"wasm_js\""]

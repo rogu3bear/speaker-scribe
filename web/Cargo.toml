@@ -1,0 +1,79 @@
+[package]
+name = "speaker-scribe-web"
+version = "0.2.0"
+edition = "2021"
+license = "MIT"
+description = "The Speaker Scribe website, served from Cloudflare Workers."
+
+# Not a member of any workspace. The desktop app's Rust lives in ../src-tauri and
+# builds for macOS; this builds for wasm32. Sharing a workspace would mean one
+# lockfile and one target directory for two crates that never link together.
+[workspace]
+
+[profile.release]
+# The whole crate is shipped to the edge on every request path, so size is the
+# thing being optimised for rather than speed.
+opt-level = "s"
+lto = true
+strip = true
+codegen-units = 1
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+axum = { version = "0.8", default-features = false, optional = true }
+# Both only for the Content-Security-Policy script hash, which is why they are
+# tied to the server feature rather than pulled into the browser bundle.
+base64 = { version = "0.22", optional = true }
+console_error_panic_hook = { version = "0.1", optional = true }
+# Not used directly. Both major versions arrive through the dependency tree and
+# neither compiles for wasm32 until its JavaScript backend is switched on, so
+# they are named here to carry the feature. See .cargo/config.toml for the
+# matching cfg flag.
+getrandom = { version = "0.4", features = ["wasm_js"] }
+getrandom03 = { package = "getrandom", version = "0.3", features = ["wasm_js"] }
+sha2 = { version = "0.10", optional = true }
+leptos = { version = "0.8" }
+leptos_axum = { version = "0.8.8", default-features = false, features = ["wasm"], optional = true }
+leptos_meta = { version = "0.8" }
+leptos_router = { version = "0.8" }
+tower-service = "0.3"
+wasm-bindgen = "0.2.121"
+worker = { version = "0.7.5", features = ["http", "axum"], optional = true }
+
+[build-dependencies]
+# Renders the legal documents at build time. Doing it here rather than at
+# request time keeps a markdown parser out of the wasm bundle entirely, and the
+# documents cannot change between deploys anyway.
+pulldown-cmark = { version = "0.12", default-features = false, features = ["html"] }
+
+[features]
+hydrate = [
+  "dep:console_error_panic_hook",
+  "leptos/hydrate",
+]
+ssr = [
+  "dep:axum",
+  "dep:base64",
+  "dep:leptos_axum",
+  "dep:sha2",
+  "dep:worker",
+  "leptos/ssr",
+  "leptos_meta/ssr",
+  "leptos_router/ssr",
+]
+
+[package.metadata.leptos]
+output-name = "speaker-scribe-web"
+site-root = "target/site"
+site-pkg-dir = "pkg"
+style-file = "style/main.css"
+assets-dir = "assets"
+site-addr = "127.0.0.1:57581"
+reload-port = 57582
+browserquery = "defaults"
+bin-features = ["ssr"]
+bin-default-features = false
+lib-features = ["hydrate"]
+lib-default-features = false
