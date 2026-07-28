@@ -132,13 +132,13 @@ impl Runtime {
 
 /// PATH with the bundle's own tools first, so `ffmpeg` resolves to the copy that
 /// ships with the app whether or not the user has one installed.
+///
+/// The bundled binary sits directly in Resources, so that is the directory to
+/// add. Our own calls go through `SPEAKER_SCRIBE_FFMPEG` and do not need this;
+/// mlx-whisper shells out by bare name and does.
 fn bundled_path(resources: &Path) -> String {
     let inherited = std::env::var("PATH").unwrap_or_default();
-    // ffmpeg is bundled as a file named `ffmpeg`; its directory is what PATH needs.
-    match resources.join("ffmpeg").parent() {
-        Some(dir) => format!("{}:{inherited}", dir.display()),
-        None => inherited,
-    }
+    format!("{}:{inherited}", resources.display())
 }
 
 /// True when something already answers on the port, so a second copy of the
