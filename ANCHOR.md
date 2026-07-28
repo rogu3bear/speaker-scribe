@@ -28,8 +28,11 @@ different product and is out of scope.
 - FastAPI owns uploads, jobs, local storage, and exports.
 - `mlx-whisper` transcribes; diarization is Silero VAD, SpeechBrain ECAPA embeddings, and clustering.
 - Every speech model is loaded lazily so the app can build and test without downloading models.
-- The packaged app ships the weights it needs to work offline, so a first run makes no
-  network request at all. Larger models are fetched only when the user asks for one.
+- The packaged app ships the weights it needs, so it makes no network request in order to
+  transcribe. Larger models are fetched only when the user asks for one, and that request
+  carries a model name and nothing else. Note that macOS itself contacts Apple to check
+  notarization on first launch; that is Gatekeeper, not the app, and "no network at all"
+  overstates it. `docs/legal/privacy.md` is the authority on this.
 - Diarization runs entirely on-machine and requires no account, token, or hosted service.
 - `SPEAKER_SCRIBE_ENGINE=mock` is the sanctioned local smoke lane.
 

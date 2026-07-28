@@ -127,3 +127,11 @@ runtime is not a virtualenv, and how signing and notarization work.
 ## Open Source
 
 This repository is MIT licensed. It depends on open-source projects with their own licenses, including `mlx-whisper` under MIT, `silero-vad` under MIT, and `speechbrain` under Apache-2.0.
+
+The bundled ffmpeg is built `--disable-gpl` on purpose, so the app stays MIT. Rebuilding it with GPL components enabled changes the licence of what you distribute.
+
+## Terms and Privacy
+
+[docs/legal/terms.md](docs/legal/terms.md) and [docs/legal/privacy.md](docs/legal/privacy.md), also readable inside the app from the links at the bottom of the sidebar.
+
+The short version: your recordings stay on your machine, nothing is collected, and whether you are allowed to record the people in your audio is your responsibility rather than something the software can answer.
