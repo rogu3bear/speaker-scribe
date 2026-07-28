@@ -128,6 +128,20 @@ because something in the bundle genuinely needs it: MLX and numba both compile
 code at runtime, and Python loads extension modules that PyPI did not sign with
 this team's certificate. The file says which is which.
 
+Those entitlements are applied to the nested binaries as well as to the app, and
+that is not redundant. The bundled interpreter is spawned as its own process, and
+a process gets the entitlements of its own signature — not its parent's. Signed
+with the hardened runtime and no entitlements, Python is denied the executable
+memory MLX and numba allocate.
+
+The resulting failure is worth recognising, because it does not look like a
+signing problem. The app launches. The server starts, answers `/api/health` with
+`ml_ready: true`, serves the UI and seeds its models. Then the first
+transcription allocates a JIT page and the kernel sends SIGKILL, so the whole
+server disappears mid-request with nothing in its log. Anything that checks only
+that the app starts will call this build good. `verify-bundle.sh` transcribes for
+exactly this reason.
+
 ## Notarization
 
 **There is no open-source route to notarization.** Apple requires a paid

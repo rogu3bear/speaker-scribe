@@ -91,7 +91,15 @@ if [ -n "${SIGN_IDENTITY:-}" ]; then
 
   COUNT="$(tr -dc '\0' <"$MACHO" | wc -c | tr -d ' ')"
   echo "    signing $COUNT nested binaries"
+  # With the same entitlements as the app, because the bundled interpreter is
+  # spawned as its own process and a process gets the entitlements of its own
+  # signature, not its parent's. Signed with the hardened runtime and nothing
+  # else, Python would be refused the executable memory that MLX and numba both
+  # need, and would fail at the first transcription rather than at launch.
+  # Entitlements on a library are ignored, so applying them uniformly is simpler
+  # than maintaining a list of which files are executables.
   xargs -0 -n 20 -P 8 codesign --force --timestamp --options runtime \
+    --entitlements "$ROOT/src-tauri/entitlements.plist" \
     --sign "$SIGN_IDENTITY" <"$MACHO"
 
   echo "    signing the app"
