@@ -1,7 +1,7 @@
 {
   "name": "speaker-scribe",
   "private": false,
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Local-first audio transcription and speaker diarization web app for Apple Silicon.",
   "license": "MIT",
   "type": "module",

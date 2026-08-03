@@ -2,7 +2,7 @@
 
 Turn recordings into transcripts with speaker turns, entirely on your Mac. No account, no API key, no upload — MLX Whisper for transcription, and a local diarizer built from Silero VAD, SpeechBrain ECAPA embeddings and clustering.
 
-### **[Download for macOS](https://github.com/rogu3bear/speaker-scribe/releases/latest)**
+### **[Download for macOS](https://github.com/rogu3bear/speaker-scribe/releases/latest/download/Speaker.Scribe_aarch64.dmg)**
 
 Apple Silicon, macOS 13 or later. Signed and notarized, so it opens without the right-click dance.
 

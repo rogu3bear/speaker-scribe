@@ -18,8 +18,9 @@ text on the website is the same file the desktop app ships inside its bundle and
 the same file GitHub renders. Editing the privacy policy is one edit. In separate
 repositories it would be one edit and a note to remember the other one.
 
-The download button points at `releases/latest`, so shipping a new version of the
-app does not require redeploying the site.
+The download button points at the stable `Speaker.Scribe_aarch64.dmg` asset on
+`releases/latest`, so it starts the download directly and shipping a new version
+does not require redeploying the site.
 
 ## What was removed from the template
 

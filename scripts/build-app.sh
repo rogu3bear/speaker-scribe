@@ -141,7 +141,7 @@ codesign --verify --strict --verbose=2 "$APP" 2>&1 | sed 's/^/    /' || true
 echo
 echo "==> Building the DMG"
 mkdir -p "$BUNDLE/dmg"
-DMG="$BUNDLE/dmg/Speaker Scribe_$(node -p "require('$ROOT/src-tauri/tauri.conf.json').version")_aarch64.dmg"
+DMG="$BUNDLE/dmg/Speaker.Scribe_aarch64.dmg"
 STAGE="$(mktemp -d)"
 cp -R "$APP" "$STAGE/"
 ln -s /Applications "$STAGE/Applications"

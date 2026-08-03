@@ -20,7 +20,7 @@ and no network. Building it needs a Rust toolchain; running it does not.
 | | |
 | --- | --- |
 | `Speaker Scribe.app` | ~1.6 GB |
-| `Speaker Scribe_0.1.0_aarch64.dmg` | ~900 MB |
+| `Speaker.Scribe_aarch64.dmg` | ~1 GB |
 
 The app opens a native window, not a browser tab. On launch it shows a loading
 page immediately, starts the local API, points the window at it when it answers,
