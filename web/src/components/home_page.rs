@@ -1,8 +1,8 @@
 use leptos::prelude::*;
 
-/// Always points at whatever the newest published release is, so the site does
-/// not need redeploying when the app ships a new version.
-const DOWNLOAD_URL: &str = "https://github.com/rogu3bear/speaker-scribe/releases/latest";
+/// The newest release always publishes the disk image under this stable name,
+/// so the site can hand over the download without a version-specific redeploy.
+const DOWNLOAD_URL: &str = "https://github.com/rogu3bear/speaker-scribe/releases/latest/download/Speaker.Scribe_aarch64.dmg";
 const SOURCE_URL: &str = "https://github.com/rogu3bear/speaker-scribe";
 
 struct Feature {

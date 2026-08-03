@@ -18,8 +18,7 @@ cd "$ROOT"
 PROFILE="${NOTARY_PROFILE:-speaker-scribe}"
 BUNDLE="$ROOT/src-tauri/target/release/bundle"
 APP="$BUNDLE/macos/Speaker Scribe.app"
-VERSION="$(node -p "require('$ROOT/src-tauri/tauri.conf.json').version")"
-DMG="$BUNDLE/dmg/Speaker Scribe_${VERSION}_aarch64.dmg"
+DMG="$BUNDLE/dmg/Speaker.Scribe_aarch64.dmg"
 
 [ -f "$DMG" ] || {
   echo "No disk image at $DMG. Run ./scripts/build-app.sh first." >&2
