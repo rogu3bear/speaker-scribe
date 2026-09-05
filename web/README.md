@@ -53,15 +53,58 @@ script and nothing else wrong.
 
 ## Deploying
 
+Use an explicitly selected deployment-purpose cfctl profile pinned to the
+intended account. From `web/`, register the repository with cfctl, qualify the
+build, and require clean reviewed source before preparing the plan:
+
 ```bash
-bunx wrangler@4.83.0 deploy
+: "${SPEAKER_SCRIBE_CFCTL_PROFILE:?select a deployment-purpose profile}"
+: "${SPEAKER_SCRIBE_CF_ACCOUNT_ID:?select its exact account}"
+: "${SPEAKER_SCRIBE_ARTIFACT_SHA256:?supply the reviewed cfctl artifact-set digest}"
+cfctl auth status "$SPEAKER_SCRIBE_CFCTL_PROFILE" --json
+cfctl guide wrangler.deploy --json
 ```
 
-Needs a Cloudflare account and a configured `wrangler` login. There is no D1
-database to provision, which is most of the setup the template's README covers.
+Before preparing a plan, require `credential_available: true` in the auth
+status result and verify that its profile ID and account ID equal the selected
+profile and account above. Stop on any mismatch or unavailable credential;
+passing `--account` explicitly does not prove that it matches the profile pin.
+
+```bash
+cfctl call wrangler.deploy \
+  --profile "$SPEAKER_SCRIBE_CFCTL_PROFILE" \
+  --account "$SPEAKER_SCRIBE_CF_ACCOUNT_ID" \
+  --query "config=$(pwd)/wrangler.toml" \
+  --query "name=speaker-scribe-web" \
+  --query "message=source=$(git rev-parse HEAD) artifact-sha256=$SPEAKER_SCRIBE_ARTIFACT_SHA256" \
+  --json
+```
+
+The digest must cover cfctl's complete artifact set with paths relative to the
+owning Git repository, including `web/build/_worker.js` and `web/target/site`.
+A hash of just the Worker, an asset-manifest hash, or a site-relative build
+comparison digest is not interchangeable. No qualified artifact digest is
+supplied here; cfctl validates the exact source and artifact identity.
+
+The call prepares a plan. With the returned operation ID, inspect and approve
+that exact plan, run it once, and inspect its verification:
+
+```bash
+: "${SPEAKER_SCRIBE_OPERATION_ID:?use the returned operation ID}"
+cfctl plans show "$SPEAKER_SCRIBE_OPERATION_ID" --json
+cfctl plans approve "$SPEAKER_SCRIBE_OPERATION_ID" --yes --json
+cfctl plans run "$SPEAKER_SCRIBE_OPERATION_ID" --json
+cfctl plans status "$SPEAKER_SCRIBE_OPERATION_ID" --json
+```
+
+Require successful verification and fresh domain/route readback before calling
+the deployment complete. On uncertain execution, retain the operation ID and
+inspect `cfctl plans status` for that ID and follow its reported recovery
+action; do not replay the upload.
 
 ## State
 
-Both feature sets compile clean for `wasm32-unknown-unknown`. The full edge build
-and a deploy have not been run — `bootstrap.sh` installs a toolchain, which is a
-decision for whoever runs it rather than something to do implicitly.
+Earlier local notes describe compilation, build, and deployment results; they
+were not reverified for the current source in this documentation pass. Current
+release status requires exact-source build evidence, the governed deployment
+receipt, and fresh authenticated readback. This README is not that evidence.
